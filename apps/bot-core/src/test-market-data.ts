@@ -17,7 +17,12 @@ async function main() {
         "\nNEW CANDLE:"
       );
 
-      console.log(data);
+      console.log(
+        `${data.key} -> NEW CANDLE CLOSED`
+      );
+
+      console.log(data.candle);
+
     }
   );
 
@@ -27,12 +32,10 @@ async function main() {
 
   setInterval(async () => {
 
-    await market.loadCandles(
-      "SPX500",
-      "M1",
-      10
+    await market.syncSymbol(
+      "SPX500"
     );
-
+    
   }, 5000);
 }
 

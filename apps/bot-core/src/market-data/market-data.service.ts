@@ -96,4 +96,27 @@ export class MarketDataService {
       `${symbol}_${timeframe}`
     );
   }
+
+  async syncSymbol(
+    symbol: string
+  ) {
+
+    const timeframes = [
+      "M1",
+      "M5",
+      "M15",
+      "H1"
+    ];
+
+    for (const tf of timeframes) {
+
+      await this.loadCandles(
+        symbol,
+        tf,
+        200
+      );
+    }
+  }
+
 }
+
