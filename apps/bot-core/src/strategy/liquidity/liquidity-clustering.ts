@@ -1,4 +1,4 @@
-import { LiquidityCluster, LiquidityLevel } from './liquidity-types';
+import { LiquidityCluster, LiquidityLevel } from '././liquidity.types';
 import { randomUUID } from 'crypto';
 
 export class LiquidityClustering {

@@ -1,42 +1,66 @@
 import { EventEmitter } from 'events';
 
+import { Candle } from '../../types/market.types';
+
 import { LiquidityClustering } from './liquidity-clustering';
 import { LiquiditySweepDetector } from './liquidity-sweep-detector';
+
 import {
   LiquidityCluster,
   LiquidityLevel,
-  LiquiditySweep,
-} from './liquidity-types';
+} from './liquidity.types';
 
 export class LiquidityEngine extends EventEmitter {
-  private readonly clustering = new LiquidityClustering();
+  private readonly clustering =
+    new LiquidityClustering();
 
-  private readonly sweepDetector = new LiquiditySweepDetector();
+  private readonly sweepDetector =
+    new LiquiditySweepDetector();
 
   private levels: LiquidityLevel[] = [];
 
   private clusters: LiquidityCluster[] = [];
 
+  private candles: Candle[] = [];
+
   addLevels(levels: LiquidityLevel[]) {
     this.levels = levels;
 
-    this.clusters = this.clustering.cluster(levels);
+    this.clusters =
+      this.clustering.cluster(levels);
 
-    this.emit('clustersUpdated', this.clusters);
+    this.emit(
+      'clustersUpdated',
+      this.clusters,
+    );
   }
 
-  analyzeCandle(candle: any) {
-    const sweeps = this.sweepDetector.detect(
-      this.clusters,
-      candle,
-    );
+  analyzeCandle(candle: Candle) {
+    this.candles.push(candle);
+
+    const sweeps =
+      this.sweepDetector.detect(
+        this.clusters,
+        candle,
+      );
 
     for (const sweep of sweeps) {
-      this.emit('liquiditySweep', sweep);
+      this.emit(
+        'liquiditySweep',
+        sweep,
+      );
     }
   }
 
   getClusters() {
     return this.clusters;
+  }
+
+  getCandles() {
+    return this.candles;
+  }
+
+  getLevels() {
+    return this.levels;
   }
 }
