@@ -5,6 +5,7 @@ import {
   CandlesResponse,
   AccountResponse,
   PositionsResponse,
+  ModifyPositionResponse,
 } from "./mt5.types";
 
 export class MT5Service {
@@ -26,6 +27,20 @@ export class MT5Service {
   async getAccount(): Promise<AccountResponse> {
     const response = await axios.get<AccountResponse>(
       `${this.baseUrl}/account`
+    );
+
+    return response.data;
+  }
+
+  async modifyPosition(
+    ticket: number,
+    symbol: string,
+    sl: number,
+    tp: number,
+  ): Promise<ModifyPositionResponse> {
+    const response = await axios.patch<ModifyPositionResponse>(
+      `${this.baseUrl}/positions/${ticket}`,
+      { symbol, sl, tp },
     );
 
     return response.data;

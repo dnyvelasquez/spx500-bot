@@ -103,6 +103,31 @@ class MT5Client:
         ]
 
     @staticmethod
+    def modify_position(ticket: int, sl: float, tp: float, symbol: str):
+
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": symbol,
+            "sl": sl,
+            "tp": tp,
+        }
+
+        result = mt5.order_send(request)
+
+        if result is None:
+            return {"success": False, "message": "Modify failed"}
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return {
+                "success": False,
+                "message": f"MT5 Error: {result.retcode}",
+                "retcode": result.retcode,
+            }
+
+        return {"success": True}
+
+    @staticmethod
     def place_order(
         symbol: str,
         order_type: str,

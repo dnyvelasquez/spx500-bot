@@ -14,6 +14,7 @@ import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
 import { ExecutionValidator } from '@bot-core/services/execution/execution-validator';
 import { MT5Executor } from '@bot-core/services/execution/mt5-executor';
+import { PositionMonitor } from '@bot-core/services/execution/position-monitor';
 import { MT5Service } from '@bot-core/services/mt5/mt5.service';
 
 import type { LiquidityLevel, LiquiditySweep } from '@bot-core/strategy/liquidity/liquidity.types';
@@ -38,10 +39,12 @@ export class Application {
   private readonly positionSizing = new PositionSizing();
   private readonly executionValidator = new ExecutionValidator();
   private readonly executor = new MT5Executor();
+  private readonly positionMonitor = new PositionMonitor();
 
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
   private bridgeDown = false;
+  private marketOpen = false;
 
   constructor() {
     this.telegramService = new TelegramService();
@@ -93,10 +96,21 @@ export class Application {
       const m1 = this.marketData.getCandles(env.SYMBOL, 'M1').length;
       const h1 = this.marketData.getCandles(env.SYMBOL, 'H1').length;
 
-      if (m1 > 0) {
+      const isOpen = m1 > 0;
+
+      if (isOpen) {
         logger.info({ m1, h1, levels }, 'Sync OK');
+        await this.monitorOpenPositions();
       } else {
         logger.debug('Sync OK — no data (market closed)');
+      }
+
+      if (isOpen && !this.marketOpen) {
+        this.marketOpen = true;
+        await this.telegramService.notifyMarketOpen();
+      } else if (!isOpen && this.marketOpen) {
+        this.marketOpen = false;
+        await this.telegramService.notifyMarketClosed();
       }
 
       if (this.bridgeDown) {
@@ -130,6 +144,53 @@ export class Application {
     this.strategy.getLiquidityEngine().addLevels(levels);
 
     return levels.length;
+  }
+
+  private async monitorOpenPositions(): Promise<void> {
+    const response = await this.mt5.getPositions(env.SYMBOL);
+
+    if (!response.success || !response.data?.length) return;
+
+    for (const position of response.data) {
+      const tickResponse = await this.mt5.getTick(position.symbol);
+
+      if (!tickResponse.success) continue;
+
+      const currentPrice =
+        position.type === 'BUY' ? tickResponse.data.bid : tickResponse.data.ask;
+
+      const action = this.positionMonitor.check(position, currentPrice);
+
+      if (!action) continue;
+
+      const result = await this.mt5.modifyPosition(
+        action.ticket,
+        action.symbol,
+        action.newSL,
+        action.keepTP,
+      );
+
+      if (!result.success) {
+        logger.error({ ticket: action.ticket, reason: action.reason }, 'Position modify failed');
+        continue;
+      }
+
+      logger.info({ ticket: action.ticket, newSL: action.newSL, reason: action.reason }, 'Position modified');
+
+      if (action.reason === 'BREAK_EVEN') {
+        await this.telegramService.notifyBreakEven({
+          ticket: action.ticket,
+          symbol: action.symbol,
+          price: action.newSL,
+        });
+      } else {
+        await this.telegramService.notifyTrailingStop({
+          ticket: action.ticket,
+          symbol: action.symbol,
+          newSL: action.newSL,
+        });
+      }
+    }
   }
 
   private async onMssConfirmed(sweep: LiquiditySweep, mss: MSS): Promise<void> {

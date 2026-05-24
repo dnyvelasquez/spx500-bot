@@ -57,3 +57,8 @@ export interface PositionsResponse {
   data?: Position[];
   message?: string;
 }
+
+export interface ModifyPositionResponse {
+  success: boolean;
+  message?: string;
+}

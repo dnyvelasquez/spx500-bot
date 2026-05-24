@@ -124,6 +124,27 @@ def get_candles(
     }
 
 
+@router.patch("/positions/{ticket}")
+def modify_position(ticket: int, body: dict):
+
+    connected = MT5Client.connect()
+
+    if not connected:
+        return {
+            "success": False,
+            "message": "MT5 not connected"
+        }
+
+    result = MT5Client.modify_position(
+        ticket=ticket,
+        sl=body["sl"],
+        tp=body["tp"],
+        symbol=body["symbol"],
+    )
+
+    return result
+
+
 @router.post("/trade")
 def place_trade(order: dict):
 

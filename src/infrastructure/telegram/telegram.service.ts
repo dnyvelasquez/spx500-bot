@@ -98,6 +98,30 @@ export class TelegramService {
     );
   }
 
+  async notifyMarketOpen(): Promise<void> {
+    await this.send(`🟢 <b>Mercado abierto</b> — ${env.SYMBOL}`);
+  }
+
+  async notifyMarketClosed(): Promise<void> {
+    await this.send(`🔴 <b>Mercado cerrado</b> — ${env.SYMBOL}`);
+  }
+
+  async notifyBreakEven(params: { ticket: number; symbol: string; price: number }): Promise<void> {
+    await this.send(
+      `🔒 <b>Break-even activado</b>\n` +
+      `Ticket: <code>${params.ticket}</code> — ${params.symbol}\n` +
+      `SL movido a <code>${params.price.toFixed(2)}</code>`,
+    );
+  }
+
+  async notifyTrailingStop(params: { ticket: number; symbol: string; newSL: number }): Promise<void> {
+    await this.send(
+      `📈 <b>Trailing stop actualizado</b>\n` +
+      `Ticket: <code>${params.ticket}</code> — ${params.symbol}\n` +
+      `Nuevo SL: <code>${params.newSL.toFixed(2)}</code>`,
+    );
+  }
+
   async notifyBridgeDown(reason: string): Promise<void> {
     await this.send(
       `🔌 <b>Bridge MT5 desconectado</b>\n` +
