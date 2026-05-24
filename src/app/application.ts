@@ -3,6 +3,7 @@ import { TelegramService } from '@infra/telegram/telegram.service';
 import { LicenseService } from '@infra/license/license.service';
 import { NewsFilterService } from '@infra/news/news-filter.service';
 import { DailyDrawdownGuard } from '@infra/risk/daily-drawdown.guard';
+import { SessionGuard } from '@infra/session/session-guard';
 
 import { env } from '@config/env';
 import { configService } from '@config/config-service';
@@ -48,6 +49,7 @@ export class Application {
   private readonly licenseService = new LicenseService();
   private readonly newsFilter = new NewsFilterService();
   private readonly drawdownGuard = new DailyDrawdownGuard();
+  private readonly sessionGuard = new SessionGuard();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
   private bridgeDown = false;
@@ -237,6 +239,13 @@ export class Application {
         { event: next?.title, time: next?.date.toISOString() },
         'Signal skipped — news blackout window (±1 min USD high-impact event)',
       );
+      return;
+    }
+
+    // ── 0b. Filtro de sesión (horarios bloqueados) ────────────────────────────
+    const sessionCheck = this.sessionGuard.isBlocked(configService.blockedHours);
+    if (sessionCheck.blocked) {
+      logger.info({ window: sessionCheck.label }, 'Signal skipped — blocked trading hours');
       return;
     }
 

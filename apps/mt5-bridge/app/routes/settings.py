@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from urllib import request as urllib_req
 
 import psycopg2
@@ -22,6 +22,22 @@ ENV_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / ".env").resolve(
 
 # ── Bot settings ──────────────────────────────────────────────────────────────
 
+DEFAULT_BLOCKED_HOURS = [
+    {"from": "09:30", "to": "09:35", "label": "NY Open"},
+    {"from": "12:00", "to": "13:00", "label": "NY Lunch"},
+    {"from": "15:45", "to": "16:00", "label": "NY Close"},
+    {"from": "16:00", "to": "09:30", "label": "Out of market"},
+]
+
+
+class BlockedWindow(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+    label: str
+
+    model_config = {"populate_by_name": True}
+
+
 class BotSettings(BaseModel):
     SYMBOL: str = Field(default="SPX500")
     RISK_PERCENT: float = Field(default=1.0, ge=0.1, le=10.0)
@@ -30,6 +46,7 @@ class BotSettings(BaseModel):
     MAX_DAILY_DRAWDOWN_PERCENT: float = Field(default=3.0, ge=0.5, le=20.0)
     TELEGRAM_ENABLED: bool = Field(default=True)
     LICENSE_KEY: str = Field(default="")
+    BLOCKED_HOURS: List[BlockedWindow] = Field(default_factory=lambda: [BlockedWindow(**{"from": w["from"], "to": w["to"], "label": w["label"]}) for w in DEFAULT_BLOCKED_HOURS])
 
 
 def _read_config() -> BotSettings:
@@ -46,7 +63,7 @@ def get_settings():
 @router.put("/settings", response_model=BotSettings)
 def update_settings(payload: BotSettings):
     try:
-        CONFIG_PATH.write_text(json.dumps(payload.model_dump(), indent=2), encoding="utf-8")
+        CONFIG_PATH.write_text(json.dumps(payload.model_dump(by_alias=True), indent=2), encoding="utf-8")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return payload

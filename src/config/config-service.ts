@@ -2,8 +2,16 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from '@infra/logger/logger';
+import type { BlockedWindow } from '@infra/session/session-guard';
 
 import { env } from './env';
+
+const DEFAULT_BLOCKED_HOURS: BlockedWindow[] = [
+  { from: '09:30', to: '09:35', label: 'NY Open' },
+  { from: '12:00', to: '13:00', label: 'NY Lunch' },
+  { from: '15:45', to: '16:00', label: 'NY Close' },
+  { from: '16:00', to: '09:30', label: 'Out of market' },
+];
 
 interface BotConfig {
   SYMBOL: string;
@@ -13,6 +21,7 @@ interface BotConfig {
   MAX_DAILY_DRAWDOWN_PERCENT?: number;
   TELEGRAM_ENABLED?: boolean;
   LICENSE_KEY?: string;
+  BLOCKED_HOURS?: BlockedWindow[];
 }
 
 const CONFIG_PATH = path.resolve(__dirname, '..', '..', 'config.json');
@@ -32,6 +41,7 @@ class ConfigService {
   get signalCooldownMinutes(): number { return this.config.SIGNAL_COOLDOWN_MINUTES; }
   get maxDailyDrawdownPercent(): number { return this.config.MAX_DAILY_DRAWDOWN_PERCENT ?? 3; }
   get telegramEnabled(): boolean { return this.config.TELEGRAM_ENABLED ?? true; }
+  get blockedHours(): BlockedWindow[] { return this.config.BLOCKED_HOURS ?? DEFAULT_BLOCKED_HOURS; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env
   get licenseKey(): string | undefined {
