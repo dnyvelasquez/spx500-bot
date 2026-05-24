@@ -40,6 +40,7 @@ export class Application {
   private readonly executor = new MT5Executor();
 
   private pollTimer: NodeJS.Timeout | null = null;
+  private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
 
   constructor() {
     this.telegramService = new TelegramService();
@@ -115,6 +116,17 @@ export class Application {
 
     if (h1Candles.length < 10 || m5Candles.length < 3) {
       logger.warn('Not enough candles to evaluate signal');
+      return;
+    }
+
+    // ── 0. Cooldown ───────────────────────────────────────────────────────────
+    const cooldownMs = env.SIGNAL_COOLDOWN_MINUTES * 60_000;
+    const lastSignal = this.lastSignalTime.get(mss.direction) ?? 0;
+    const elapsed = Date.now() - lastSignal;
+
+    if (elapsed < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - elapsed) / 60_000);
+      logger.debug({ direction: mss.direction, remaining }, 'Signal skipped — cooldown active');
       return;
     }
 
@@ -216,6 +228,8 @@ export class Application {
       stopLoss,
       takeProfit,
     };
+
+    this.lastSignalTime.set(mssDirection, Date.now());
 
     const notifParams = {
       side: order.side,

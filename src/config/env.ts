@@ -20,6 +20,9 @@ const envSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
 
+  // Minutos de espera entre señales del mismo tipo (BULLISH o BEARISH)
+  SIGNAL_COOLDOWN_MINUTES: z.coerce.number().min(1).default(30),
+
   // Chat ID de Telegram donde enviar notificaciones (opcional)
   // Para obtenerlo: envía un mensaje al bot y visita
   // https://api.telegram.org/bot{TOKEN}/getUpdates
