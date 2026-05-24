@@ -86,13 +86,22 @@ export class Application {
 
   private async sync(): Promise<void> {
     await this.marketData.syncSymbol(env.SYMBOL);
-    this.refreshLiquidityLevels();
+    const levels = this.refreshLiquidityLevels();
+
+    const m1 = this.marketData.getCandles(env.SYMBOL, 'M1').length;
+    const h1 = this.marketData.getCandles(env.SYMBOL, 'H1').length;
+
+    if (m1 > 0) {
+      logger.info({ m1, h1, levels }, 'Sync OK');
+    } else {
+      logger.debug('Sync OK — no data (market closed)');
+    }
   }
 
-  private refreshLiquidityLevels(): void {
+  private refreshLiquidityLevels(): number {
     const h1Candles = this.marketData.getCandles(env.SYMBOL, 'H1');
 
-    if (h1Candles.length < 5) return;
+    if (h1Candles.length < 5) return 0;
 
     const swings = this.swingDetector.detectSwings(h1Candles);
 
@@ -105,7 +114,7 @@ export class Application {
 
     this.strategy.getLiquidityEngine().addLevels(levels);
 
-    logger.debug({ count: levels.length }, 'Liquidity levels refreshed');
+    return levels.length;
   }
 
   private async onMssConfirmed(sweep: LiquiditySweep, mss: MSS): Promise<void> {
