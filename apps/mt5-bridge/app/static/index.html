@@ -90,6 +90,38 @@
     .dot.red    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
     .dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
 
+    /* Top row — tres cards en una línea */
+    .top-row {
+      display: flex;
+      gap: 12px;
+      max-width: 600px;
+      margin: 0 auto 20px;
+    }
+
+    .top-row .card {
+      flex: 1;
+      margin: 0;
+      min-width: 0;
+      padding: 16px;
+    }
+
+    .top-row .status-row {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .top-row .status-detail {
+      margin-left: 0;
+      width: 100%;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .top-row .license-grid {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
     .status-text { font-size: 14px; }
     .status-detail { font-size: 12px; color: var(--muted); margin-left: auto; }
 
@@ -385,9 +417,11 @@
   <span class="version">Dashboard</span>
 </header>
 
+<div class="top-row">
+
 <!-- Bridge status -->
 <div class="card">
-  <div class="card-title">Estado del bridge</div>
+  <div class="card-title">Bridge</div>
   <div class="status-row">
     <div class="dot" id="dot"></div>
     <span class="status-text" id="status-text">Comprobando…</span>
@@ -397,7 +431,7 @@
 
 <!-- Bot trading status -->
 <div class="card">
-  <div class="card-title">Estado del bot</div>
+  <div class="card-title">Bot</div>
   <div class="status-row">
     <div class="dot" id="bot-dot"></div>
     <span class="status-text" id="bot-status-text">Comprobando…</span>
@@ -446,6 +480,8 @@
     </div>
   </div>
 </div>
+
+</div><!-- /.top-row -->
 
 <!-- Settings form -->
 <div class="card">
