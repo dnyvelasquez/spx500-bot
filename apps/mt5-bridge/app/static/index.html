@@ -277,6 +277,65 @@
       flex: unset;
     }
     .btn-edit:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Journal */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .stat-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-box .stat-val {
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .stat-box .stat-lbl {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    .trade-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .trade-table th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 500;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .trade-table td {
+      padding: 8px 8px;
+      border-bottom: 1px solid rgba(42,45,58,.5);
+      white-space: nowrap;
+    }
+
+    .trade-table tr:last-child td { border-bottom: none; }
+
+    .journal-empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 24px 0;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -363,6 +422,11 @@
   </div>
 
   <div class="field">
+    <label for="max-profit">Objetivo de ganancia por sesión (%)</label>
+    <input type="number" id="max-profit" min="0.5" max="20" step="0.5" />
+  </div>
+
+  <div class="field">
     <label>Modo de trading</label>
     <div class="toggle-row">
       <span class="toggle-label" id="live-label">Paper (sin órdenes reales)</span>
@@ -422,6 +486,37 @@
   </div>
 </div>
 
+<!-- Journal -->
+<div class="card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Journal</span>
+    <button class="btn-edit" onclick="loadJournal()">Actualizar</button>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-box">
+      <div class="stat-val" id="j-winrate">—</div>
+      <div class="stat-lbl">Win Rate</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="j-pf">—</div>
+      <div class="stat-lbl">Profit Factor</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="j-rr">—</div>
+      <div class="stat-lbl">Avg R:R</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="j-pnl">—</div>
+      <div class="stat-lbl">P&L Total</div>
+    </div>
+  </div>
+
+  <div id="journal-table-wrap">
+    <div class="journal-empty">Cargando…</div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -470,8 +565,9 @@
   function applyToForm(cfg) {
     $('symbol').value       = cfg.SYMBOL ?? 'SPX500';
     $('risk').value         = cfg.RISK_PERCENT ?? 1;
-    $('cooldown').value     = cfg.SIGNAL_COOLDOWN_MINUTES ?? 5;
+    $('cooldown').value     = cfg.SIGNAL_COOLDOWN_MINUTES ?? 30;
     $('max-drawdown').value = cfg.MAX_DAILY_DRAWDOWN_PERCENT ?? 3;
+    $('max-profit').value   = cfg.MAX_DAILY_PROFIT_PERCENT ?? 3;
 
     const live = cfg.LIVE_TRADING === true;
     $('live-trading').checked = live;
@@ -495,6 +591,7 @@
       LIVE_TRADING:                $('live-trading').checked,
       SIGNAL_COOLDOWN_MINUTES:     parseInt($('cooldown').value, 10),
       MAX_DAILY_DRAWDOWN_PERCENT:  parseFloat($('max-drawdown').value),
+      MAX_DAILY_PROFIT_PERCENT:    parseFloat($('max-profit').value),
     };
 
     if (!payload.SYMBOL) { toast('El símbolo no puede estar vacío', 'err'); return; }
@@ -507,6 +604,9 @@
     if (isNaN(payload.MAX_DAILY_DRAWDOWN_PERCENT) || payload.MAX_DAILY_DRAWDOWN_PERCENT < 0.5) {
       toast('Pérdida máxima mínima: 0.5%', 'err'); return;
     }
+    if (isNaN(payload.MAX_DAILY_PROFIT_PERCENT) || payload.MAX_DAILY_PROFIT_PERCENT < 0.5) {
+      toast('Objetivo de ganancia mínimo: 0.5%', 'err'); return;
+    }
 
     $('btn-save').disabled = true;
     $('btn-save').textContent = 'Guardando…';
@@ -515,7 +615,7 @@
       const r = await fetch(`${API}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, LICENSE_KEY: original.LICENSE_KEY ?? '' }),
+        body: JSON.stringify({ ...payload, LICENSE_KEY: original.LICENSE_KEY ?? '', TELEGRAM_ENABLED: original.TELEGRAM_ENABLED ?? true }),
       });
 
       if (!r.ok) {
@@ -708,12 +808,82 @@
     }
   }
 
+  // ── Journal ───────────────────────────────────────────────────────────────
+  async function loadJournal() {
+    try {
+      const [sRes, tRes] = await Promise.all([
+        fetch(`${API}/journal/stats`),
+        fetch(`${API}/journal/trades?limit=20`),
+      ]);
+
+      if (sRes.ok) {
+        const { data: s } = await sRes.json();
+        $('j-winrate').textContent = s.total_closed > 0 ? `${s.win_rate}%` : '—';
+        $('j-winrate').style.color = s.win_rate >= 50 ? 'var(--green)' : s.total_closed > 0 ? 'var(--red)' : 'var(--text)';
+        $('j-pf').textContent = s.profit_factor !== null ? s.profit_factor.toFixed(2) : '—';
+        $('j-pf').style.color = s.profit_factor >= 1.5 ? 'var(--green)' : s.profit_factor !== null ? 'var(--yellow)' : 'var(--text)';
+        $('j-rr').textContent = s.avg_rr !== null ? s.avg_rr.toFixed(2) : '—';
+        $('j-rr').style.color = s.avg_rr >= 1.5 ? 'var(--green)' : s.avg_rr !== null ? 'var(--yellow)' : 'var(--text)';
+        const pnl = s.total_pnl;
+        $('j-pnl').textContent = pnl >= 0 ? `+$${pnl.toFixed(0)}` : `-$${Math.abs(pnl).toFixed(0)}`;
+        $('j-pnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+      }
+
+      if (tRes.ok) {
+        const { data: trades } = await tRes.json();
+        const wrap = $('journal-table-wrap');
+
+        if (!trades.length) {
+          wrap.innerHTML = '<div class="journal-empty">No hay operaciones registradas aún</div>';
+          return;
+        }
+
+        const resultBadge = r => {
+          if (!r) return '<span style="color:var(--muted)">—</span>';
+          const colors = { WIN: 'var(--green)', LOSS: 'var(--red)', BE: 'var(--yellow)' };
+          return `<span style="color:${colors[r] ?? 'var(--muted)'};font-weight:600">${r}</span>`;
+        };
+
+        const rows = trades.map(t => {
+          const date = t.opened_at ? new Date(t.opened_at).toLocaleDateString('es', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+          const pnl = t.profit !== null ? (t.profit >= 0 ? `<span style="color:var(--green)">+$${t.profit.toFixed(2)}</span>` : `<span style="color:var(--red)">-$${Math.abs(t.profit).toFixed(2)}</span>`) : '—';
+          return `<tr>
+            <td style="color:var(--muted)">${date}</td>
+            <td>${t.symbol}</td>
+            <td style="color:${t.side==='BUY'?'var(--green)':'var(--red)'}">${t.side}</td>
+            <td>${t.volume}</td>
+            <td>${t.entry_price.toFixed(1)}</td>
+            <td style="color:var(--muted)">${t.planned_rr.toFixed(2)}</td>
+            <td>${t.actual_rr !== null ? t.actual_rr.toFixed(2) : '—'}</td>
+            <td>${pnl}</td>
+            <td>${resultBadge(t.result)}</td>
+          </tr>`;
+        }).join('');
+
+        wrap.innerHTML = `
+          <div style="overflow-x:auto">
+            <table class="trade-table">
+              <thead><tr>
+                <th>Fecha</th><th>Símbolo</th><th>Dir</th><th>Lotes</th>
+                <th>Entrada</th><th>R:R plan</th><th>R:R real</th><th>P&amp;L</th><th>Resultado</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+    } catch {
+      $('journal-table-wrap').innerHTML = '<div class="journal-empty" style="color:var(--red)">Error al cargar el journal</div>';
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
   checkHealth();
   loadSettings();
   loadLicense();
   loadTelegram();
+  loadJournal();
   setInterval(checkHealth, 15_000);
+  setInterval(loadJournal, 30_000);
 </script>
 </body>
 </html>

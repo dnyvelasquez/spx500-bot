@@ -3,7 +3,9 @@ import { TelegramService } from '@infra/telegram/telegram.service';
 import { LicenseService } from '@infra/license/license.service';
 import { NewsFilterService } from '@infra/news/news-filter.service';
 import { DailyDrawdownGuard } from '@infra/risk/daily-drawdown.guard';
+import { DailyProfitTargetGuard } from '@infra/risk/daily-profit-target.guard';
 import { SessionGuard } from '@infra/session/session-guard';
+import { TradeJournalService } from '@infra/journal/trade-journal.service';
 
 import { env } from '@config/env';
 import { configService } from '@config/config-service';
@@ -49,9 +51,13 @@ export class Application {
   private readonly licenseService = new LicenseService();
   private readonly newsFilter = new NewsFilterService();
   private readonly drawdownGuard = new DailyDrawdownGuard();
+  private readonly profitTargetGuard = new DailyProfitTargetGuard();
   private readonly sessionGuard = new SessionGuard();
+  private readonly journal = new TradeJournalService();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
+  private openPositionTickets = new Set<number>();
+  private mt5Login = 0;
   private bridgeDown = false;
   private marketOpen = false;
 
@@ -66,6 +72,8 @@ export class Application {
     logger.info('Application starting...');
 
     await this.validateLicense();
+
+    await this.journal.initialize();
 
     await this.newsFilter.initialize();
 
@@ -109,6 +117,7 @@ export class Application {
     }
 
     const { login, tradeMode } = accountResponse.data;
+    this.mt5Login = login;
 
     try {
       await this.licenseService.validate(login, tradeMode);
@@ -142,6 +151,7 @@ export class Application {
         const accountRes = await this.mt5.getAccount();
         if (accountRes.success && accountRes.data) {
           this.drawdownGuard.setReference(accountRes.data.balance);
+          this.profitTargetGuard.setReference(accountRes.data.balance);
         }
         await this.telegramService.notifyMarketOpen();
       } else if (!isOpen && this.marketOpen) {
@@ -185,9 +195,21 @@ export class Application {
   private async monitorOpenPositions(): Promise<void> {
     const response = await this.mt5.getPositions(configService.symbol);
 
-    if (!response.success || !response.data?.length) return;
+    if (!response.success) return;
 
-    for (const position of response.data) {
+    const currentPositions = response.data ?? [];
+    const currentTickets = new Set(currentPositions.map((p) => p.ticket));
+
+    // Detect closed positions and update journal
+    for (const ticket of this.openPositionTickets) {
+      if (!currentTickets.has(ticket)) {
+        await this.onPositionClosed(ticket);
+      }
+    }
+    this.openPositionTickets = currentTickets;
+
+    // Monitor open positions (break-even / trailing stop)
+    for (const position of currentPositions) {
       const tickResponse = await this.mt5.getTick(position.symbol);
 
       if (!tickResponse.success) continue;
@@ -226,6 +248,17 @@ export class Application {
           newSL: action.newSL,
         });
       }
+    }
+  }
+
+  private async onPositionClosed(ticket: number): Promise<void> {
+    try {
+      const history = await this.mt5.getPositionHistory(ticket);
+      if (history.success && history.data) {
+        await this.journal.recordClose(ticket, history.data.closePrice, history.data.profit);
+      }
+    } catch (err) {
+      logger.warn({ ticket, err }, 'Could not fetch position history for journal');
     }
   }
 
@@ -369,6 +402,17 @@ export class Application {
       return;
     }
 
+    if (this.profitTargetGuard.isReached(balance, configService.maxDailyProfitPercent)) {
+      logger.info(
+        {
+          profitPct: this.profitTargetGuard.profitPct(balance).toFixed(2),
+          target: configService.maxDailyProfitPercent,
+        },
+        'Signal skipped — daily profit target reached',
+      );
+      return;
+    }
+
     const sizing = this.positionSizing.calculate({
       accountBalance: balance,
       riskPercent: configService.riskPercent,
@@ -433,6 +477,22 @@ export class Application {
     if (result.success) {
       logger.info({ orderId: result.orderId }, 'Order placed successfully');
       await this.telegramService.notifyOrderPlaced({ ...notifParams, orderId: result.orderId });
+
+      if (result.orderId !== undefined) {
+        this.openPositionTickets.add(result.orderId);
+        await this.journal.recordOpen({
+          ticket: result.orderId,
+          mt5Login: this.mt5Login,
+          symbol: order.symbol,
+          side: order.side,
+          volume: order.volume,
+          entryPrice,
+          stopLoss,
+          takeProfit,
+          plannedRr: sizing.riskRewardRatio,
+          riskAmount: sizing.riskAmount,
+        });
+      }
     } else {
       logger.error({ message: result.message }, 'Order failed');
       await this.telegramService.notifyOrderFailed({ side: order.side, symbol: order.symbol, reason: result.message });

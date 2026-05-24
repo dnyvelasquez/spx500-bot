@@ -22,6 +22,7 @@ interface BotConfig {
   TELEGRAM_ENABLED?: boolean;
   LICENSE_KEY?: string;
   BLOCKED_HOURS?: BlockedWindow[];
+  MAX_DAILY_PROFIT_PERCENT?: number;
 }
 
 const CONFIG_PATH = path.resolve(__dirname, '..', '..', 'config.json');
@@ -42,6 +43,7 @@ class ConfigService {
   get maxDailyDrawdownPercent(): number { return this.config.MAX_DAILY_DRAWDOWN_PERCENT ?? 3; }
   get telegramEnabled(): boolean { return this.config.TELEGRAM_ENABLED ?? true; }
   get blockedHours(): BlockedWindow[] { return this.config.BLOCKED_HOURS ?? DEFAULT_BLOCKED_HOURS; }
+  get maxDailyProfitPercent(): number { return this.config.MAX_DAILY_PROFIT_PERCENT ?? 3; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env
   get licenseKey(): string | undefined {

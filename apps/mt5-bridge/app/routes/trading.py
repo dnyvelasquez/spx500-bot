@@ -145,6 +145,22 @@ def modify_position(ticket: int, body: dict):
     return result
 
 
+@router.get("/history/{ticket}")
+def get_position_history(ticket: int):
+
+    connected = MT5Client.connect()
+
+    if not connected:
+        return {"success": False, "message": "MT5 not connected"}
+
+    history = MT5Client.get_position_history(ticket)
+
+    if history is None:
+        return {"success": False, "message": f"No history found for ticket {ticket}"}
+
+    return {"success": True, "data": history}
+
+
 @router.post("/trade")
 def place_trade(order: dict):
 

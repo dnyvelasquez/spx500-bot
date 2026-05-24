@@ -6,6 +6,7 @@ import {
   AccountResponse,
   PositionsResponse,
   ModifyPositionResponse,
+  PositionHistoryResponse,
 } from "./mt5.types";
 
 export class MT5Service {
@@ -65,6 +66,13 @@ export class MT5Service {
         `${this.baseUrl}/candles/${symbol}/${timeframe}?count=${count}`
       );
 
+    return response.data;
+  }
+
+  async getPositionHistory(ticket: number): Promise<PositionHistoryResponse> {
+    const response = await axios.get<PositionHistoryResponse>(
+      `${this.baseUrl}/history/${ticket}`
+    );
     return response.data;
   }
 }

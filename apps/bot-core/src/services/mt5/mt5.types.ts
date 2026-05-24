@@ -64,3 +64,15 @@ export interface ModifyPositionResponse {
   success: boolean;
   message?: string;
 }
+
+export interface PositionHistoryData {
+  ticket: number;
+  closePrice: number;
+  profit: number;
+}
+
+export interface PositionHistoryResponse {
+  success: boolean;
+  data?: PositionHistoryData;
+  message?: string;
+}

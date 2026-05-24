@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import MetaTrader5 as mt5
 
 TIMEFRAMES = {
@@ -130,6 +132,29 @@ class MT5Client:
             }
 
         return {"success": True}
+
+    @staticmethod
+    def get_position_history(ticket: int):
+        from_date = datetime(2020, 1, 1)
+        to_date = datetime.now() + timedelta(days=1)
+
+        deals = mt5.history_deals_get(from_date, to_date, position=ticket)
+
+        if deals is None or len(deals) == 0:
+            return None
+
+        # DEAL_ENTRY_OUT = 1 (closing deal)
+        closing = [d for d in deals if d.entry == 1]
+
+        if not closing:
+            return None
+
+        deal = closing[-1]
+        return {
+            "ticket": ticket,
+            "closePrice": float(deal.price),
+            "profit": float(deal.profit),
+        }
 
     @staticmethod
     def place_order(
