@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPX500 Bot — Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #4f8ef7;
+      --accent-dim: #2d5bb3;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    header {
+      max-width: 600px;
+      margin: 0 auto 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    header span.version {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 600px;
+      margin: 0 auto 20px;
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* Status */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--muted);
+    }
+
+    .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+
+    .status-text { font-size: 14px; }
+    .status-detail { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+    /* Form */
+    .field {
+      margin-bottom: 20px;
+    }
+
+    .field:last-of-type { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+    }
+
+    .toggle-label { color: var(--text); font-size: 14px; }
+
+    .toggle {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 24px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .slider::before {
+      content: '';
+      position: absolute;
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    input:checked + .slider { background: var(--accent); }
+    input:checked + .slider::before { transform: translateX(20px); }
+
+    /* Live warning */
+    .live-warning {
+      display: none;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--yellow);
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: 6px;
+      padding: 8px 12px;
+    }
+
+    /* Actions */
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    button {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    button:active { transform: scale(0.98); }
+
+    .btn-save {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-save:hover { opacity: 0.9; }
+    .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-reset {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .btn-reset:hover { border-color: var(--text); color: var(--text); }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      font-size: 13px;
+      transition: transform 0.25s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.ok  { border-color: var(--green); color: var(--green); }
+    #toast.err { border-color: var(--red);   color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SPX500 Bot</h1>
+  <span class="version">Dashboard</span>
+</header>
+
+<!-- Bridge status -->
+<div class="card">
+  <div class="card-title">Estado del bridge</div>
+  <div class="status-row">
+    <div class="dot" id="dot"></div>
+    <span class="status-text" id="status-text">Comprobando…</span>
+    <span class="status-detail" id="status-detail"></span>
+  </div>
+</div>
+
+<!-- Settings form -->
+<div class="card">
+  <div class="card-title">Configuración</div>
+
+  <div class="field">
+    <label for="symbol">Símbolo (MT5)</label>
+    <input type="text" id="symbol" placeholder="US500" autocomplete="off" />
+  </div>
+
+  <div class="field">
+    <label for="risk">Riesgo por operación (%)</label>
+    <input type="number" id="risk" min="0.1" max="10" step="0.1" />
+  </div>
+
+  <div class="field">
+    <label for="cooldown">Cooldown entre señales (minutos)</label>
+    <input type="number" id="cooldown" min="1" max="1440" step="1" />
+  </div>
+
+  <div class="field">
+    <label>Modo de trading</label>
+    <div class="toggle-row">
+      <span class="toggle-label" id="live-label">Paper (sin órdenes reales)</span>
+      <label class="toggle">
+        <input type="checkbox" id="live-trading" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="live-warning" id="live-warning">
+      ⚠ Live trading activo — las órdenes se enviarán a MT5 con dinero real.
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-reset" id="btn-reset">Restablecer</button>
+    <button class="btn-save" id="btn-save">Guardar cambios</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const API = '/api';
+  let original = {};
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  function toast(msg, type = 'ok') {
+    const el = $('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    setTimeout(() => { el.className = ''; }, 3000);
+  }
+
+  // ── Bridge status ─────────────────────────────────────────────────────────
+  async function checkHealth() {
+    try {
+      const r = await fetch(`${API}/trading/health`);
+      const data = await r.json();
+      const connected = data?.data?.connected === true;
+
+      $('dot').className = 'dot ' + (connected ? 'green' : 'red');
+      $('status-text').textContent = connected ? 'Conectado a MetaTrader 5' : 'Sin conexión a MT5';
+      $('status-detail').textContent = connected
+        ? (data?.data?.server ?? '')
+        : (data?.detail ?? 'Bridge disponible pero MT5 desconectado');
+    } catch {
+      $('dot').className = 'dot red';
+      $('status-text').textContent = 'Bridge no disponible';
+      $('status-detail').textContent = 'Verifica que uvicorn esté corriendo';
+    }
+  }
+
+  // ── Load settings ─────────────────────────────────────────────────────────
+  async function loadSettings() {
+    try {
+      const r = await fetch(`${API}/settings`);
+      const cfg = await r.json();
+      original = { ...cfg };
+      applyToForm(cfg);
+    } catch {
+      toast('No se pudo cargar la configuración', 'err');
+    }
+  }
+
+  function applyToForm(cfg) {
+    $('symbol').value   = cfg.SYMBOL ?? 'US500';
+    $('risk').value     = cfg.RISK_PERCENT ?? 1;
+    $('cooldown').value = cfg.SIGNAL_COOLDOWN_MINUTES ?? 30;
+
+    const live = cfg.LIVE_TRADING === true;
+    $('live-trading').checked = live;
+    updateLiveLabel(live);
+  }
+
+  function updateLiveLabel(live) {
+    $('live-label').textContent = live
+      ? 'Live (órdenes reales activas)'
+      : 'Paper (sin órdenes reales)';
+    $('live-warning').style.display = live ? 'block' : 'none';
+  }
+
+  $('live-trading').addEventListener('change', e => updateLiveLabel(e.target.checked));
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  $('btn-save').addEventListener('click', async () => {
+    const payload = {
+      SYMBOL:                   $('symbol').value.trim().toUpperCase(),
+      RISK_PERCENT:             parseFloat($('risk').value),
+      LIVE_TRADING:             $('live-trading').checked,
+      SIGNAL_COOLDOWN_MINUTES:  parseInt($('cooldown').value, 10),
+    };
+
+    if (!payload.SYMBOL) { toast('El símbolo no puede estar vacío', 'err'); return; }
+    if (isNaN(payload.RISK_PERCENT) || payload.RISK_PERCENT < 0.1 || payload.RISK_PERCENT > 10) {
+      toast('Riesgo debe estar entre 0.1 y 10', 'err'); return;
+    }
+    if (isNaN(payload.SIGNAL_COOLDOWN_MINUTES) || payload.SIGNAL_COOLDOWN_MINUTES < 1) {
+      toast('Cooldown mínimo: 1 minuto', 'err'); return;
+    }
+
+    $('btn-save').disabled = true;
+    $('btn-save').textContent = 'Guardando…';
+
+    try {
+      const r = await fetch(`${API}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${r.status}`);
+      }
+
+      original = { ...payload };
+      toast('✓ Configuración guardada — el bot la aplicará en el próximo ciclo', 'ok');
+    } catch (e) {
+      toast(`Error: ${e.message}`, 'err');
+    } finally {
+      $('btn-save').disabled = false;
+      $('btn-save').textContent = 'Guardar cambios';
+    }
+  });
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  $('btn-reset').addEventListener('click', () => {
+    applyToForm(original);
+    toast('Valores restaurados', 'ok');
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  checkHealth();
+  loadSettings();
+  setInterval(checkHealth, 15_000);
+</script>
+</body>
+</html>

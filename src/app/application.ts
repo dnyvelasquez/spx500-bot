@@ -2,6 +2,7 @@ import { logger } from '@infra/logger/logger';
 import { TelegramService } from '@infra/telegram/telegram.service';
 
 import { env } from '@config/env';
+import { configService } from '@config/config-service';
 
 import { MarketDataService } from '@bot-core/market-data/market-data.service';
 import { StrategyEngine } from '@bot-core/core/strategy-engine';
@@ -80,26 +81,27 @@ export class Application {
     );
 
     logger.info(
-      `Application started — symbol: ${env.SYMBOL} | ` +
-      `risk: ${env.RISK_PERCENT}% | ` +
-      `live trading: ${env.LIVE_TRADING}`,
+      `Application started — symbol: ${configService.symbol} | ` +
+      `risk: ${configService.riskPercent}% | ` +
+      `live trading: ${configService.liveTrading}`,
     );
 
-    await this.telegramService.notifyStartup(env.SYMBOL, env.RISK_PERCENT, env.LIVE_TRADING);
+    await this.telegramService.notifyStartup(configService.symbol, configService.riskPercent, configService.liveTrading);
   }
 
   private async sync(): Promise<void> {
+    const symbol = configService.symbol;
     try {
-      await this.marketData.syncSymbol(env.SYMBOL);
+      await this.marketData.syncSymbol(symbol);
       const levels = this.refreshLiquidityLevels();
 
-      const m1 = this.marketData.getCandles(env.SYMBOL, 'M1').length;
-      const h1 = this.marketData.getCandles(env.SYMBOL, 'H1').length;
+      const m1 = this.marketData.getCandles(symbol, 'M1').length;
+      const h1 = this.marketData.getCandles(symbol, 'H1').length;
 
       const isOpen = m1 > 0;
 
       if (isOpen) {
-        logger.info({ m1, h1, levels }, 'Sync OK');
+        logger.info({ symbol, m1, h1, levels }, 'Sync OK');
         await this.monitorOpenPositions();
       } else {
         logger.debug('Sync OK — no data (market closed)');
@@ -128,7 +130,7 @@ export class Application {
   }
 
   private refreshLiquidityLevels(): number {
-    const h1Candles = this.marketData.getCandles(env.SYMBOL, 'H1');
+    const h1Candles = this.marketData.getCandles(configService.symbol, 'H1');
 
     if (h1Candles.length < 5) return 0;
 
@@ -147,7 +149,7 @@ export class Application {
   }
 
   private async monitorOpenPositions(): Promise<void> {
-    const response = await this.mt5.getPositions(env.SYMBOL);
+    const response = await this.mt5.getPositions(configService.symbol);
 
     if (!response.success || !response.data?.length) return;
 
@@ -196,8 +198,9 @@ export class Application {
   private async onMssConfirmed(sweep: LiquiditySweep, mss: MSS): Promise<void> {
     logger.info({ direction: mss.direction, brokenPrice: mss.brokenPrice }, 'MSS confirmed');
 
-    const h1Candles = this.marketData.getCandles(env.SYMBOL, 'H1');
-    const m5Candles = this.marketData.getCandles(env.SYMBOL, 'M5');
+    const symbol = configService.symbol;
+    const h1Candles = this.marketData.getCandles(symbol, 'H1');
+    const m5Candles = this.marketData.getCandles(symbol, 'M5');
 
     if (h1Candles.length < 10 || m5Candles.length < 3) {
       logger.warn('Not enough candles to evaluate signal');
@@ -205,7 +208,7 @@ export class Application {
     }
 
     // ── 0. Posiciones abiertas ────────────────────────────────────────────────
-    const positionsResponse = await this.mt5.getPositions(env.SYMBOL);
+    const positionsResponse = await this.mt5.getPositions(symbol);
 
     if (!positionsResponse.success) {
       logger.error('Could not check open positions — trade skipped');
@@ -223,7 +226,7 @@ export class Application {
     }
 
     // ── 1. Cooldown ───────────────────────────────────────────────────────────
-    const cooldownMs = env.SIGNAL_COOLDOWN_MINUTES * 60_000;
+    const cooldownMs = configService.signalCooldownMinutes * 60_000;
     const lastSignal = this.lastSignalTime.get(mss.direction) ?? 0;
     const elapsed = Date.now() - lastSignal;
 
@@ -306,7 +309,7 @@ export class Application {
 
     const sizing = this.positionSizing.calculate({
       accountBalance: balance,
-      riskPercent: env.RISK_PERCENT,
+      riskPercent: configService.riskPercent,
       entryPrice,
       stopLoss,
       target: takeProfit,
@@ -324,7 +327,7 @@ export class Application {
 
     // ── 6. Ejecución ──────────────────────────────────────────────────────────
     const order = {
-      symbol: env.SYMBOL,
+      symbol,
       side: mssDirection === 'BULLISH' ? ('BUY' as const) : ('SELL' as const),
       volume,
       entryPrice,
@@ -345,7 +348,7 @@ export class Application {
       riskAmount: sizing.riskAmount.toFixed(2),
     };
 
-    if (!env.LIVE_TRADING) {
+    if (!configService.liveTrading) {
       logger.info(
         { ...order, rr: notifParams.rr, riskAmount: notifParams.riskAmount },
         '[PAPER] Trade setup',
@@ -381,5 +384,7 @@ export class Application {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+
+    configService.stop();
   }
 }

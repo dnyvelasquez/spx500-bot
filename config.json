@@ -1,0 +1,6 @@
+{
+  "SYMBOL": "US500",
+  "RISK_PERCENT": 1,
+  "LIVE_TRADING": false,
+  "SIGNAL_COOLDOWN_MINUTES": 30
+}
