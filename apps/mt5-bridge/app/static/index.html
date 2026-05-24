@@ -265,6 +265,18 @@
     .badge-muted { background: rgba(100,116,139,.12);color: var(--muted); border: 1px solid rgba(100,116,139,.25); }
 
     .license-pending { color: var(--muted); font-size: 13px; }
+
+    .btn-edit {
+      font-size: 12px;
+      padding: 4px 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      flex: unset;
+    }
+    .btn-edit:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -286,9 +298,48 @@
 
 <!-- License -->
 <div class="card">
-  <div class="card-title">Licencia</div>
-  <div id="license-body">
-    <span class="license-pending">Cargando…</span>
+  <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+    <span>Licencia</span>
+    <button class="btn-edit" id="btn-license-edit" onclick="toggleLicenseEdit()">Editar</button>
+  </div>
+  <div id="license-body"><span class="license-pending">Cargando…</span></div>
+  <div id="license-form" style="display:none">
+    <div class="license-grid" style="margin-bottom:16px">
+      <div class="field" style="margin-bottom:0">
+        <label for="lf-owner">Titular</label>
+        <input type="text" id="lf-owner" />
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="lf-account">Cuenta MT5</label>
+        <input type="number" id="lf-account" min="1" />
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="lf-mode">Modo permitido</label>
+        <select id="lf-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;padding:10px 12px;outline:none">
+          <option value="demo">Solo demo</option>
+          <option value="live">Solo live</option>
+          <option value="both">Demo y live</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="lf-expires">Vencimiento (opcional)</label>
+        <input type="date" id="lf-expires" style="color-scheme:dark" />
+      </div>
+      <div class="field" style="grid-column:span 2;margin-bottom:0">
+        <label>Estado</label>
+        <div class="toggle-row">
+          <span id="lf-active-label">Activa</span>
+          <label class="toggle">
+            <input type="checkbox" id="lf-active" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:0">
+      <button class="btn-reset" onclick="cancelLicenseEdit()">Cancelar</button>
+      <button class="btn-save" id="btn-license-save" onclick="saveLicense()">Guardar licencia</button>
+    </div>
   </div>
 </div>
 
@@ -444,6 +495,71 @@
   });
 
   // ── License ───────────────────────────────────────────────────────────────
+  let currentLicense = null;
+
+  function toggleLicenseEdit() {
+    $('license-body').style.display = 'none';
+    $('license-form').style.display = 'block';
+    $('btn-license-edit').style.display = 'none';
+    if (currentLicense) {
+      $('lf-owner').value   = currentLicense.owner_name;
+      $('lf-account').value = currentLicense.mt5_account;
+      $('lf-mode').value    = currentLicense.allowed_mode;
+      $('lf-expires').value = currentLicense.expires_at
+        ? currentLicense.expires_at.split('T')[0] : '';
+      $('lf-active').checked = currentLicense.active;
+      updateActiveLabel(currentLicense.active);
+    }
+  }
+
+  function cancelLicenseEdit() {
+    $('license-body').style.display = 'block';
+    $('license-form').style.display = 'none';
+    $('btn-license-edit').style.display = '';
+  }
+
+  function updateActiveLabel(active) {
+    $('lf-active-label').textContent = active ? 'Activa' : 'Inactiva';
+  }
+  $('lf-active').addEventListener('change', e => updateActiveLabel(e.target.checked));
+
+  async function saveLicense() {
+    const btn = $('btn-license-save');
+    btn.disabled = true;
+    btn.textContent = 'Guardando…';
+
+    const payload = {
+      owner_name:   $('lf-owner').value.trim(),
+      mt5_account:  parseInt($('lf-account').value, 10),
+      allowed_mode: $('lf-mode').value,
+      active:       $('lf-active').checked,
+      expires_at:   $('lf-expires').value || null,
+    };
+
+    if (!payload.owner_name) { toast('El titular no puede estar vacío', 'err'); btn.disabled = false; btn.textContent = 'Guardar licencia'; return; }
+    if (!payload.mt5_account || payload.mt5_account < 1) { toast('Número de cuenta inválido', 'err'); btn.disabled = false; btn.textContent = 'Guardar licencia'; return; }
+
+    try {
+      const r = await fetch(`${API}/license`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${r.status}`);
+      }
+      toast('✓ Licencia guardada', 'ok');
+      cancelLicenseEdit();
+      await loadLicense();
+    } catch (e) {
+      toast(`Error: ${e.message}`, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Guardar licencia';
+    }
+  }
+
   async function loadLicense() {
     const body = $('license-body');
     try {
@@ -453,6 +569,7 @@
         return;
       }
       const d = await r.json();
+      currentLicense = d;
 
       const modeLabel  = { demo: 'Solo demo', live: 'Solo live', both: 'Demo y live' }[d.allowed_mode] ?? d.allowed_mode;
       const activeBadge = d.active
