@@ -316,13 +316,11 @@
     try {
       const r = await fetch(`${API}/trading/health`);
       const data = await r.json();
-      const connected = data?.data?.connected === true;
+      const connected = data?.mt5_connected === true || data?.success === true;
 
       $('dot').className = 'dot ' + (connected ? 'green' : 'red');
       $('status-text').textContent = connected ? 'Conectado a MetaTrader 5' : 'Sin conexión a MT5';
-      $('status-detail').textContent = connected
-        ? (data?.data?.server ?? '')
-        : (data?.detail ?? 'Bridge disponible pero MT5 desconectado');
+      $('status-detail').textContent = connected ? 'MT5 online' : 'Bridge disponible pero MT5 desconectado';
     } catch {
       $('dot').className = 'dot red';
       $('status-text').textContent = 'Bridge no disponible';
