@@ -5,4 +5,5 @@ logs
 coverage
 *.log
 license-cache.json
+bot-status.json
 __pycache__
