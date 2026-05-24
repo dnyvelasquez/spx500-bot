@@ -10,6 +10,7 @@ interface BotConfig {
   RISK_PERCENT: number;
   LIVE_TRADING: boolean;
   SIGNAL_COOLDOWN_MINUTES: number;
+  MAX_DAILY_DRAWDOWN_PERCENT?: number;
   TELEGRAM_ENABLED?: boolean;
   LICENSE_KEY?: string;
 }
@@ -29,6 +30,7 @@ class ConfigService {
   get riskPercent(): number { return this.config.RISK_PERCENT; }
   get liveTrading(): boolean { return this.config.LIVE_TRADING; }
   get signalCooldownMinutes(): number { return this.config.SIGNAL_COOLDOWN_MINUTES; }
+  get maxDailyDrawdownPercent(): number { return this.config.MAX_DAILY_DRAWDOWN_PERCENT ?? 3; }
   get telegramEnabled(): boolean { return this.config.TELEGRAM_ENABLED ?? true; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env

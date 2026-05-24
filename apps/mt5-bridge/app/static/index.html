@@ -358,6 +358,11 @@
   </div>
 
   <div class="field">
+    <label for="max-drawdown">Pérdida máxima por sesión (%)</label>
+    <input type="number" id="max-drawdown" min="0.5" max="20" step="0.5" />
+  </div>
+
+  <div class="field">
     <label>Modo de trading</label>
     <div class="toggle-row">
       <span class="toggle-label" id="live-label">Paper (sin órdenes reales)</span>
@@ -463,9 +468,10 @@
   }
 
   function applyToForm(cfg) {
-    $('symbol').value   = cfg.SYMBOL ?? 'US500';
-    $('risk').value     = cfg.RISK_PERCENT ?? 1;
-    $('cooldown').value = cfg.SIGNAL_COOLDOWN_MINUTES ?? 30;
+    $('symbol').value       = cfg.SYMBOL ?? 'SPX500';
+    $('risk').value         = cfg.RISK_PERCENT ?? 1;
+    $('cooldown').value     = cfg.SIGNAL_COOLDOWN_MINUTES ?? 5;
+    $('max-drawdown').value = cfg.MAX_DAILY_DRAWDOWN_PERCENT ?? 3;
 
     const live = cfg.LIVE_TRADING === true;
     $('live-trading').checked = live;
@@ -484,10 +490,11 @@
   // ── Save ──────────────────────────────────────────────────────────────────
   $('btn-save').addEventListener('click', async () => {
     const payload = {
-      SYMBOL:                   $('symbol').value.trim().toUpperCase(),
-      RISK_PERCENT:             parseFloat($('risk').value),
-      LIVE_TRADING:             $('live-trading').checked,
-      SIGNAL_COOLDOWN_MINUTES:  parseInt($('cooldown').value, 10),
+      SYMBOL:                      $('symbol').value.trim().toUpperCase(),
+      RISK_PERCENT:                parseFloat($('risk').value),
+      LIVE_TRADING:                $('live-trading').checked,
+      SIGNAL_COOLDOWN_MINUTES:     parseInt($('cooldown').value, 10),
+      MAX_DAILY_DRAWDOWN_PERCENT:  parseFloat($('max-drawdown').value),
     };
 
     if (!payload.SYMBOL) { toast('El símbolo no puede estar vacío', 'err'); return; }
@@ -496,6 +503,9 @@
     }
     if (isNaN(payload.SIGNAL_COOLDOWN_MINUTES) || payload.SIGNAL_COOLDOWN_MINUTES < 1) {
       toast('Cooldown mínimo: 1 minuto', 'err'); return;
+    }
+    if (isNaN(payload.MAX_DAILY_DRAWDOWN_PERCENT) || payload.MAX_DAILY_DRAWDOWN_PERCENT < 0.5) {
+      toast('Pérdida máxima mínima: 0.5%', 'err'); return;
     }
 
     $('btn-save').disabled = true;

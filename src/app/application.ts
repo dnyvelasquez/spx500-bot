@@ -2,6 +2,7 @@ import { logger } from '@infra/logger/logger';
 import { TelegramService } from '@infra/telegram/telegram.service';
 import { LicenseService } from '@infra/license/license.service';
 import { NewsFilterService } from '@infra/news/news-filter.service';
+import { DailyDrawdownGuard } from '@infra/risk/daily-drawdown.guard';
 
 import { env } from '@config/env';
 import { configService } from '@config/config-service';
@@ -46,6 +47,7 @@ export class Application {
 
   private readonly licenseService = new LicenseService();
   private readonly newsFilter = new NewsFilterService();
+  private readonly drawdownGuard = new DailyDrawdownGuard();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
   private bridgeDown = false;
@@ -135,6 +137,10 @@ export class Application {
 
       if (isOpen && !this.marketOpen) {
         this.marketOpen = true;
+        const accountRes = await this.mt5.getAccount();
+        if (accountRes.success && accountRes.data) {
+          this.drawdownGuard.setReference(accountRes.data.balance);
+        }
         await this.telegramService.notifyMarketOpen();
       } else if (!isOpen && this.marketOpen) {
         this.marketOpen = false;
@@ -333,7 +339,7 @@ export class Application {
         ? entryPrice + slDistance * 2
         : entryPrice - slDistance * 2;
 
-    // ── 7. Balance y sizing ───────────────────────────────────────────────────
+    // ── 7. Balance, drawdown y sizing ────────────────────────────────────────
     const accountResponse = await this.mt5.getAccount();
 
     if (!accountResponse.success || !accountResponse.data) {
@@ -342,6 +348,17 @@ export class Application {
     }
 
     const { balance } = accountResponse.data;
+
+    if (this.drawdownGuard.isBreached(balance, configService.maxDailyDrawdownPercent)) {
+      logger.warn(
+        {
+          drawdownPct: this.drawdownGuard.drawdownPct(balance).toFixed(2),
+          limit: configService.maxDailyDrawdownPercent,
+        },
+        'Signal skipped — daily drawdown limit reached',
+      );
+      return;
+    }
 
     const sizing = this.positionSizing.calculate({
       accountBalance: balance,
