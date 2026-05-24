@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.core.mt5_client import MT5Client
@@ -122,6 +124,35 @@ def get_candles(
         "timeframe": timeframe,
         "count": count,
         "data": candles
+    }
+
+
+@router.get("/candles/{symbol}/{timeframe}/range")
+def get_candles_range(symbol: str, timeframe: str, from_date: str, to_date: str):
+    connected = MT5Client.connect()
+    if not connected:
+        return {"success": False, "message": "MT5 not connected"}
+
+    tf = TIMEFRAMES.get(timeframe)
+    if tf is None:
+        return {"success": False, "message": "Invalid timeframe"}
+
+    try:
+        from_dt = datetime.fromisoformat(from_date)
+        to_dt = datetime.fromisoformat(to_date)
+    except ValueError:
+        return {"success": False, "message": "Invalid date format — use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS"}
+
+    candles = MT5Client.get_rates_range(symbol, tf, from_dt, to_dt)
+    if candles is None:
+        return {"success": False, "message": f"No data for {symbol}/{timeframe} in the requested range"}
+
+    return {
+        "success": True,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "count": len(candles),
+        "data": candles,
     }
 
 

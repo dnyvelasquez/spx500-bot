@@ -40,6 +40,23 @@ class MT5Client:
         }
 
     @staticmethod
+    def get_rates_range(symbol: str, timeframe, from_dt, to_dt):
+        rates = mt5.copy_rates_range(symbol, timeframe, from_dt, to_dt)
+        if rates is None:
+            return None
+        return [
+            {
+                "time": int(r["time"]),
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "tick_volume": int(r["tick_volume"]),
+            }
+            for r in rates
+        ]
+
+    @staticmethod
     def get_rates(symbol: str, timeframe, count: int):
 
         rates = mt5.copy_rates_from_pos(

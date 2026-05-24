@@ -210,11 +210,76 @@ El dashboard queda disponible en `http://localhost:8000`.
 npm run dev          # Modo desarrollo con hot-reload
 npm run build        # Compilar para producción
 npm start            # Ejecutar build de producción
+npm run backtest     # Modo backtest (ver sección Backtest)
 npm test             # Correr tests unitarios
 npm run test:watch   # Tests en modo watch
 npm run typecheck    # Verificar tipos TypeScript
 npm run lint         # ESLint
 ```
+
+## Backtest
+
+Replaya velas históricas de MT5 contra la misma estrategia de trading en vivo (LiquidityEngine → FVGEngine → EntryValidator) sin arriesgar capital.
+
+### Requisitos
+
+- El bridge de Python debe estar corriendo (`uvicorn`) para que el backtest pueda consultar las velas históricas de MT5.
+- MetaTrader 5 debe estar abierto con la cuenta activa.
+
+### Uso
+
+```bash
+npm run backtest -- --from 2025-01-01 --to 2025-05-01
+```
+
+Parámetros disponibles:
+
+| Parámetro | Default | Descripción |
+|---|---|---|
+| `--from` | (requerido) | Fecha de inicio `YYYY-MM-DD` |
+| `--to` | (requerido) | Fecha de fin `YYYY-MM-DD` |
+| `--symbol` | Desde `config.json` | Símbolo a testear |
+| `--balance` | `10000` | Balance inicial simulado en USD |
+| `--risk` | Desde `config.json` | % de riesgo por trade |
+| `--cooldown` | Desde `config.json` | Minutos de cooldown entre señales |
+
+Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS` y `M15_CONFIRMATION_ENABLED` se leen automáticamente desde `config.json`.
+
+### Salida
+
+El backtest imprime en consola un resumen por trade y las métricas finales:
+
+```
+════════════════════════════════════════════════════════════════════════════════
+ SPX500 Bot — Backtest │ SPX500  2025-01-01 → 2025-05-01
+ Balance: $10,000.00 → $10,847.32  │  Risk: 1%  │  Cooldown: 30 min
+════════════════════════════════════════════════════════════════════════════════
+
+  # │ Apertura (ET)     │ Dir  │    Entry │       SL │       TP │   R:R │ Resultado │    P&L ($)
+────────────────────────────────────────────────────────────────────────────────
+  1 │ 2025-01-07 10:25  │ BUY  │  4750.50 │  4738.20 │  4774.90 │  2.00 │ ✓ WIN     │      +47.50
+
+════════════════════════════════════════════════════════════════════════════════
+ RESULTADOS
+════════════════════════════════════════════════════════════════════════════════
+ Win rate:              65.2%
+ Profit factor:         2.14
+ Max drawdown:          4.2%
+```
+
+Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backtest-SPX500-2025-01-01-2025-05-01.json`.
+
+### Fidelidad del backtest
+
+| Aspecto | Comportamiento |
+|---|---|
+| Filtros activos | Session guard, cooldown, FVG size, M15 confirmation (si activo en config) |
+| Filtros omitidos | Daily drawdown / profit / trade count — el backtest evalúa señales sin cortar días |
+| News filter | No simulado — requeriría datos históricos de noticias |
+| Entrada al mercado | Al midpoint del FVG (o cierre de la última vela M5 si no hay FVG), sin slippage |
+| Salida | Se busca la primera vela M5 futura que toca TP o SL; si ambos se tocan en la misma vela, se asume SL primero (pesimista) salvo que el open ya esté pasado el TP |
+| Partial TPs | No simulados — resultado calculado sobre posición completa |
+| Warm-up | El motor de estrategia se precalienta con 5 días previos a `--from` + 100 velas M5 |
 
 ## Endpoints del bridge
 
@@ -222,7 +287,8 @@ npm run lint         # ESLint
 |---|---|---|
 | GET | `/api/trading/health` | Estado de conexión MT5 |
 | GET | `/api/trading/account` | Balance, equity y margen |
-| GET | `/api/trading/candles/{symbol}/{timeframe}` | Velas históricas |
+| GET | `/api/trading/candles/{symbol}/{timeframe}` | Últimas N velas |
+| GET | `/api/trading/candles/{symbol}/{timeframe}/range` | Velas por rango de fechas (`?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`) |
 | GET | `/api/trading/positions/{symbol}` | Posiciones abiertas |
 | PATCH | `/api/trading/positions/{ticket}` | Modificar SL/TP |
 | POST | `/api/trading/positions/{ticket}/partial-close` | Cierre parcial de posición (TPs parciales) |
