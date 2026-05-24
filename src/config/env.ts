@@ -24,9 +24,12 @@ const envSchema = z.object({
   SIGNAL_COOLDOWN_MINUTES: z.coerce.number().min(1).default(30),
 
   // Chat ID de Telegram donde enviar notificaciones (opcional)
-  // Para obtenerlo: envía un mensaje al bot y visita
-  // https://api.telegram.org/bot{TOKEN}/getUpdates
   TELEGRAM_CHAT_ID: z.string().optional(),
+
+  // Supabase — validación de licencia (opcional en desarrollo)
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  LICENSE_KEY: z.string().uuid().optional(),
 });
 
 export const env = envSchema.parse(process.env);

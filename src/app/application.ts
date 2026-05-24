@@ -1,5 +1,6 @@
 import { logger } from '@infra/logger/logger';
 import { TelegramService } from '@infra/telegram/telegram.service';
+import { LicenseService } from '@infra/license/license.service';
 
 import { env } from '@config/env';
 import { configService } from '@config/config-service';
@@ -42,6 +43,7 @@ export class Application {
   private readonly executor = new MT5Executor();
   private readonly positionMonitor = new PositionMonitor();
 
+  private readonly licenseService = new LicenseService();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
   private bridgeDown = false;
@@ -56,6 +58,8 @@ export class Application {
 
   public async start(): Promise<void> {
     logger.info('Application starting...');
+
+    await this.validateLicense();
 
     await this.telegramService.initialize();
 
@@ -87,6 +91,24 @@ export class Application {
     );
 
     await this.telegramService.notifyStartup(configService.symbol, configService.riskPercent, configService.liveTrading);
+  }
+
+  private async validateLicense(): Promise<void> {
+    const accountResponse = await this.mt5.getAccount();
+
+    if (!accountResponse.success || !accountResponse.data) {
+      throw new Error('Cannot reach MT5 bridge — start the bridge before the bot');
+    }
+
+    const { login, tradeMode } = accountResponse.data;
+
+    try {
+      await this.licenseService.validate(login, tradeMode);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.error({ reason }, 'License validation failed — bot will not start');
+      throw err;
+    }
   }
 
   private async sync(): Promise<void> {

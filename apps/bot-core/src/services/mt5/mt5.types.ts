@@ -29,6 +29,8 @@ export interface CandlesResponse {
 }
 
 export interface AccountInfo {
+  login: number;
+  tradeMode: 'DEMO' | 'CONTEST' | 'REAL';
   balance: number;
   equity: number;
   margin: number;

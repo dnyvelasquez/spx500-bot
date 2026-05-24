@@ -73,7 +73,11 @@ class MT5Client:
         if info is None:
             return None
 
+        trade_mode_map = {0: "DEMO", 1: "CONTEST", 2: "REAL"}
+
         return {
+            "login": int(info.login),
+            "tradeMode": trade_mode_map.get(info.trade_mode, "DEMO"),
             "balance": float(info.balance),
             "equity": float(info.equity),
             "margin": float(info.margin),
