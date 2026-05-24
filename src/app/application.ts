@@ -25,8 +25,8 @@ import type { LiquidityLevel, LiquiditySweep } from '@bot-core/strategy/liquidit
 import type { MSS } from '@bot-core/strategy/mss/mss-types';
 
 const POLL_INTERVAL_MS = 10_000;
-const MAX_VOLUME = 1.0;
-const MIN_VOLUME = 0.01;
+const MAX_VOLUME = 20.0;
+const MIN_VOLUME = 0.1;
 const SL_BUFFER_RATIO = 0.1;
 
 export class Application {
@@ -375,7 +375,7 @@ export class Application {
 
     const volume = Math.min(
       MAX_VOLUME,
-      Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 100) / 100),
+      Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 10) / 10),
     );
 
     // ── 8. Ejecución ──────────────────────────────────────────────────────────
