@@ -4,3 +4,5 @@ dist
 logs
 coverage
 *.log
+license-cache.json
+__pycache__
