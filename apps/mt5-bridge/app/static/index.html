@@ -86,8 +86,9 @@
       background: var(--muted);
     }
 
-    .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .dot.red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .dot.green  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+    .dot.red    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
+    .dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
 
     .status-text { font-size: 14px; }
     .status-detail { font-size: 12px; color: var(--muted); margin-left: auto; }
@@ -355,6 +356,16 @@
   </div>
 </div>
 
+<!-- Bot trading status -->
+<div class="card">
+  <div class="card-title">Estado del bot</div>
+  <div class="status-row">
+    <div class="dot" id="bot-dot"></div>
+    <span class="status-text" id="bot-status-text">Comprobando…</span>
+    <span class="status-detail" id="bot-status-detail"></span>
+  </div>
+</div>
+
 <!-- License activation -->
 <div class="card">
   <div class="card-title">Licencia</div>
@@ -531,6 +542,43 @@
     el.textContent = msg;
     el.className = `show ${type}`;
     setTimeout(() => { el.className = ''; }, 3000);
+  }
+
+  // ── Bot trading status ────────────────────────────────────────────────────
+  async function checkBotStatus() {
+    try {
+      const r = await fetch(`${API}/status`);
+      const d = await r.json();
+
+      const dot  = $('bot-dot');
+      const text = $('bot-status-text');
+      const detail = $('bot-status-detail');
+
+      if (!d.available) {
+        dot.className = 'dot';
+        text.textContent = 'Bot no disponible';
+        detail.textContent = d.reason ?? '';
+        return;
+      }
+
+      if (d.ready) {
+        dot.className = 'dot green';
+        text.textContent = 'Listo para operar';
+        detail.textContent = '';
+      } else if (d.reason === 'Mercado cerrado') {
+        dot.className = 'dot yellow';
+        text.textContent = 'Mercado cerrado';
+        detail.textContent = '';
+      } else {
+        dot.className = 'dot red';
+        text.textContent = 'Bloqueado';
+        detail.textContent = d.reason ?? '';
+      }
+    } catch {
+      $('bot-dot').className = 'dot';
+      $('bot-status-text').textContent = 'Bot no disponible';
+      $('bot-status-detail').textContent = '';
+    }
   }
 
   // ── Bridge status ─────────────────────────────────────────────────────────
@@ -878,11 +926,13 @@
 
   // ── Init ──────────────────────────────────────────────────────────────────
   checkHealth();
+  checkBotStatus();
   loadSettings();
   loadLicense();
   loadTelegram();
   loadJournal();
   setInterval(checkHealth, 15_000);
+  setInterval(checkBotStatus, 10_000);
   setInterval(loadJournal, 30_000);
 </script>
 </body>

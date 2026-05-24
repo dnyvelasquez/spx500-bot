@@ -18,6 +18,24 @@ router = APIRouter()
 CONFIG_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "config.json").resolve()
 LICENSE_CACHE_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "license-cache.json").resolve()
 ENV_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / ".env").resolve()
+BOT_STATUS_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "bot-status.json").resolve()
+
+
+# ── Bot trading status ────────────────────────────────────────────────────────
+
+@router.get("/status")
+def get_bot_status():
+    try:
+        data = json.loads(BOT_STATUS_PATH.read_text(encoding="utf-8"))
+        updated = datetime.fromisoformat(data["updatedAt"].replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - updated).total_seconds()
+        if age > 30:
+            return {"available": False, "ready": False, "reason": "Bot sin actividad reciente", "age": round(age)}
+        return {"available": True, "ready": data.get("ready", False), "reason": data.get("reason"), "age": round(age)}
+    except FileNotFoundError:
+        return {"available": False, "ready": False, "reason": "Bot no disponible"}
+    except Exception as exc:
+        return {"available": False, "ready": False, "reason": str(exc)}
 
 
 # ── Bot settings ──────────────────────────────────────────────────────────────

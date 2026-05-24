@@ -3,7 +3,30 @@
   "RISK_PERCENT": 1.0,
   "LIVE_TRADING": true,
   "SIGNAL_COOLDOWN_MINUTES": 5,
-  "MAX_DAILY_DRAWDOWN_PERCENT": 3,
+  "MAX_DAILY_DRAWDOWN_PERCENT": 3.0,
   "TELEGRAM_ENABLED": true,
-  "LICENSE_KEY": "1e7e4bf5-a6cb-45a3-a201-ac6102335104"
+  "LICENSE_KEY": "1e7e4bf5-a6cb-45a3-a201-ac6102335104",
+  "BLOCKED_HOURS": [
+    {
+      "from": "09:30",
+      "to": "09:35",
+      "label": "NY Open"
+    },
+    {
+      "from": "12:00",
+      "to": "13:00",
+      "label": "NY Lunch"
+    },
+    {
+      "from": "15:45",
+      "to": "16:00",
+      "label": "NY Close"
+    },
+    {
+      "from": "16:00",
+      "to": "09:30",
+      "label": "Out of market"
+    }
+  ],
+  "MAX_DAILY_PROFIT_PERCENT": 6.0
 }

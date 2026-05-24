@@ -6,6 +6,7 @@ import { DailyDrawdownGuard } from '@infra/risk/daily-drawdown.guard';
 import { DailyProfitTargetGuard } from '@infra/risk/daily-profit-target.guard';
 import { SessionGuard } from '@infra/session/session-guard';
 import { TradeJournalService } from '@infra/journal/trade-journal.service';
+import { BotStatusService } from '@infra/status/bot-status.service';
 
 import { env } from '@config/env';
 import { configService } from '@config/config-service';
@@ -54,10 +55,12 @@ export class Application {
   private readonly profitTargetGuard = new DailyProfitTargetGuard();
   private readonly sessionGuard = new SessionGuard();
   private readonly journal = new TradeJournalService();
+  private readonly statusService = new BotStatusService();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
   private openPositionTickets = new Set<number>();
   private mt5Login = 0;
+  private lastKnownBalance = 0;
   private bridgeDown = false;
   private marketOpen = false;
 
@@ -150,6 +153,7 @@ export class Application {
         this.marketOpen = true;
         const accountRes = await this.mt5.getAccount();
         if (accountRes.success && accountRes.data) {
+          this.lastKnownBalance = accountRes.data.balance;
           this.drawdownGuard.setReference(accountRes.data.balance);
           this.profitTargetGuard.setReference(accountRes.data.balance);
         }
@@ -163,6 +167,8 @@ export class Application {
         this.bridgeDown = false;
         await this.telegramService.notifyBridgeRecovered();
       }
+
+      this.writeStatus();
     } catch (err) {
       logger.error(err, 'Sync failed — bridge unreachable');
 
@@ -171,6 +177,53 @@ export class Application {
         await this.telegramService.notifyBridgeDown(String(err));
       }
     }
+  }
+
+  private writeStatus(): void {
+    const now = new Date().toISOString();
+
+    if (!this.marketOpen) {
+      this.statusService.write({ ready: false, reason: 'Mercado cerrado', updatedAt: now });
+      return;
+    }
+
+    const session = this.sessionGuard.isBlocked(configService.blockedHours);
+    if (session.blocked) {
+      this.statusService.write({ ready: false, reason: `Horario bloqueado — ${session.label}`, updatedAt: now });
+      return;
+    }
+
+    if (this.newsFilter.isBlocked()) {
+      const next = this.newsFilter.nextBlockedEvent();
+      this.statusService.write({ ready: false, reason: `Noticias — ${next?.title ?? 'evento USD de alto impacto'}`, updatedAt: now });
+      return;
+    }
+
+    if (this.lastKnownBalance > 0) {
+      if (this.drawdownGuard.isBreached(this.lastKnownBalance, configService.maxDailyDrawdownPercent)) {
+        const pct = this.drawdownGuard.drawdownPct(this.lastKnownBalance).toFixed(1);
+        this.statusService.write({ ready: false, reason: `Límite de pérdida diaria alcanzado (${pct}% / ${configService.maxDailyDrawdownPercent}%)`, updatedAt: now });
+        return;
+      }
+
+      if (this.profitTargetGuard.isReached(this.lastKnownBalance, configService.maxDailyProfitPercent)) {
+        const pct = this.profitTargetGuard.profitPct(this.lastKnownBalance).toFixed(1);
+        this.statusService.write({ ready: false, reason: `Objetivo de ganancia alcanzado (${pct}% / ${configService.maxDailyProfitPercent}%)`, updatedAt: now });
+        return;
+      }
+    }
+
+    const cooldownMs = configService.signalCooldownMinutes * 60_000;
+    const bullishElapsed = Date.now() - (this.lastSignalTime.get('BULLISH') ?? 0);
+    const bearishElapsed = Date.now() - (this.lastSignalTime.get('BEARISH') ?? 0);
+
+    if (bullishElapsed < cooldownMs && bearishElapsed < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - Math.max(bullishElapsed, bearishElapsed)) / 60_000);
+      this.statusService.write({ ready: false, reason: `Cooldown activo — ${remaining} min restantes`, updatedAt: now });
+      return;
+    }
+
+    this.statusService.write({ ready: true, reason: null, updatedAt: now });
   }
 
   private refreshLiquidityLevels(): number {
@@ -390,6 +443,7 @@ export class Application {
     }
 
     const { balance } = accountResponse.data;
+    this.lastKnownBalance = balance;
 
     if (this.drawdownGuard.isBreached(balance, configService.maxDailyDrawdownPercent)) {
       logger.warn(
