@@ -3,9 +3,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib import request as urllib_req
 
 import psycopg2
 import psycopg2.extras
+from dotenv import dotenv_values, set_key
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,7 @@ router = APIRouter()
 
 CONFIG_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "config.json").resolve()
 LICENSE_CACHE_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "license-cache.json").resolve()
+ENV_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / ".env").resolve()
 
 
 # ── Bot settings ──────────────────────────────────────────────────────────────
@@ -161,3 +164,61 @@ def validate_license(body: ValidateRequest):
         allowed_mode=row["allowed_mode"],
         expires_at=expires_str,
     )
+
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
+
+class TelegramConfig(BaseModel):
+    token: str = Field(default="")
+    chat_id: str = Field(default="")
+
+
+class TelegramTestResult(BaseModel):
+    success: bool
+    detail: str
+
+
+def _read_telegram() -> TelegramConfig:
+    values = dotenv_values(str(ENV_PATH))
+    return TelegramConfig(
+        token=values.get("TELEGRAM_BOT_TOKEN", ""),
+        chat_id=values.get("TELEGRAM_CHAT_ID", ""),
+    )
+
+
+@router.get("/telegram", response_model=TelegramConfig)
+def get_telegram():
+    return _read_telegram()
+
+
+@router.put("/telegram", response_model=TelegramConfig)
+def update_telegram(payload: TelegramConfig):
+    if not payload.token:
+        raise HTTPException(status_code=400, detail="El token no puede estar vacío")
+    set_key(str(ENV_PATH), "TELEGRAM_BOT_TOKEN", payload.token)
+    set_key(str(ENV_PATH), "TELEGRAM_CHAT_ID", payload.chat_id)
+    return payload
+
+
+@router.post("/telegram/test", response_model=TelegramTestResult)
+def test_telegram():
+    cfg = _read_telegram()
+    if not cfg.token or not cfg.chat_id:
+        return TelegramTestResult(success=False, detail="Token o Chat ID no configurados")
+
+    url = f"https://api.telegram.org/bot{cfg.token}/sendMessage"
+    body = json.dumps({
+        "chat_id": cfg.chat_id,
+        "text": "🤖 SPX500 Bot — prueba de conexión Telegram exitosa",
+        "parse_mode": "HTML",
+    }).encode()
+
+    try:
+        req = urllib_req.Request(url, data=body, headers={"Content-Type": "application/json"})
+        with urllib_req.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                return TelegramTestResult(success=True, detail="Mensaje enviado correctamente")
+            return TelegramTestResult(success=False, detail=result.get("description", "Error desconocido"))
+    except Exception as exc:
+        return TelegramTestResult(success=False, detail=str(exc))
