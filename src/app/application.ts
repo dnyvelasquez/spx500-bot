@@ -266,7 +266,8 @@ export class Application {
   }
 
   private refreshLiquidityLevels(): number {
-    const m5Candles = this.marketData.getCandles(configService.symbol, 'M5');
+    const symbol = configService.symbol;
+    const m5Candles = this.marketData.getCandles(symbol, 'M5');
 
     if (m5Candles.length < 20) return 0;
 
@@ -492,18 +493,33 @@ export class Application {
       return;
     }
 
-    // ── 6. Niveles de precio ──────────────────────────────────────────────────
-    // FVG validates setup quality; execution is always a market order, not limit at FVG midpoint
-    const entryPrice = lastM5.close;
+    // ── 5b. Confirmación M1 (opcional) ──────────────────────────────────────
+    let m1ConfirmCandle: { close: number; low: number; high: number } | null = null;
 
-    // SL: más allá del extremo del sweep con un buffer del 10% del rango de esa vela
+    if (configService.m1ConfirmationEnabled) {
+      const m1Candles = this.marketData.getCandles(symbol, 'M1');
+      const m1Window = m1Candles.slice(-5);
+      const m1Disp = m1Window.find(c => {
+        const d = this.displacementDetector.detect(c);
+        return d?.direction === mssDirection;
+      });
+      if (!m1Disp) {
+        logger.debug({ mssDirection }, 'Signal skipped — no M1 displacement confirmation');
+        return;
+      }
+      m1ConfirmCandle = m1Disp;
+    }
+
+    // ── 6. Niveles de precio ──────────────────────────────────────────────────
+    // SL always based on M5 sweep candle — wide enough to survive intraday noise
     const sweepRange = sweep.sweepCandleHigh - sweep.sweepCandleLow;
     const buffer = sweepRange * SL_BUFFER_RATIO;
+    const stopLoss = mssDirection === 'BULLISH'
+      ? sweep.sweepCandleLow - buffer
+      : sweep.sweepCandleHigh + buffer;
 
-    const stopLoss =
-      mssDirection === 'BULLISH'
-        ? sweep.sweepCandleLow - buffer
-        : sweep.sweepCandleHigh + buffer;
+    // Entry: M1 displacement close if confirmed, otherwise M5 candle close
+    const entryPrice = m1ConfirmCandle ? m1ConfirmCandle.close : lastM5.close;
 
     // TP: mínimo 2:1 R:R
     const slDistance = Math.abs(entryPrice - stopLoss);

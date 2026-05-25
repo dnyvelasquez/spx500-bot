@@ -24,7 +24,7 @@ export class DisplacementDetector {
 
     const strength = bodySize / range;
 
-    const isStrong = strength >= 0.7;
+    const isStrong = strength >= 0.6;
 
     if (!isStrong) {
       return null;

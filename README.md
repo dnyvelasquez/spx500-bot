@@ -49,13 +49,20 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 
 El bot requiere **5 condiciones simultáneas** antes de abrir una posición:
 
-1. **Sesgo HTF alineado** — BiasEngine detecta BOS/CHOCH en H1
-2. **Sweep de liquidez** — precio toma stops por encima/debajo de un nivel BSL/SSL
-3. **Market Structure Shift (MSS)** — rotura de estructura en dirección contraria al sweep
-4. **Desplazamiento** — vela M5 con cuerpo ≥ 70% del rango
-5. **Fair Value Gap (FVG)** — imbalance de precio en las últimas 3 velas M5
+1. **Sesgo D1 alineado** — BiasEngine detecta BOS/CHOCH en velas diarias (D1)
+2. **Sweep de liquidez** — precio toma stops por encima/debajo de un nivel EQH/EQL en M5 (patrón de 1 o 2 velas)
+3. **Market Structure Shift (MSS)** — rotura del último swing high/low real detectado por SwingDetector
+4. **Desplazamiento** — vela M5 con cuerpo ≥ 60% del rango
+5. **Fair Value Gap (FVG)** — imbalance en las últimas 7 velas M5 (el FVG se forma durante la vela de desplazamiento, 2-5 barras antes del MSS)
 
-La entrada es siempre a precio de mercado (cierre de la vela M5 del setup). El FVG valida la calidad del setup pero la ejecución es siempre una orden de mercado. El SL va más allá del extremo de la vela del sweep y el TP garantiza mínimo 2:1 R:R.
+La entrada es siempre a precio de mercado (cierre de la vela M5 del setup). El SL va más allá del extremo de la vela del sweep y el TP garantiza mínimo 2:1 R:R.
+
+### Sweep de 2 velas
+
+Además del patrón clásico de 1 sola vela (mecha + cierre de vuelta en la misma vela), el bot detecta el patrón de 2 velas:
+
+- **Vela 1** — mecha por encima del EQH (o debajo del EQL) sin cerrar de vuelta
+- **Vela 2** — cierra por debajo del EQH (o encima del EQL) confirmando el rechazo
 
 ## Filtros de riesgo
 
@@ -245,7 +252,7 @@ Parámetros disponibles:
 | `--risk` | Desde `config.json` | % de riesgo por trade |
 | `--cooldown` | Desde `config.json` | Minutos de cooldown entre señales |
 
-Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS` y `M15_CONFIRMATION_ENABLED` se leen automáticamente desde `config.json`.
+Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS`, `MIN_SL_POINTS`, `M15_CONFIRMATION_ENABLED` y `M1_CONFIRMATION_ENABLED` se leen automáticamente desde `config.json`.
 
 ### Salida
 
@@ -328,7 +335,8 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | Filtro | Parámetro | Comportamiento |
 |---|---|---|
 | **Tamaño mínimo de FVG** | `MIN_FVG_POINTS` | Ignora FVGs cuyo gap sea menor al valor en puntos. `0` = desactivado. |
-| **Confirmación M15** | `M15_CONFIRMATION_ENABLED` | Exige que el sesgo en M15 (calculado con BiasEngine) esté alineado con el sesgo H1 antes de entrar. Reduce falsos setups. |
+| **Confirmación M15** | `M15_CONFIRMATION_ENABLED` | Exige que el sesgo en M15 esté alineado con el sesgo D1 antes de entrar. Reduce falsos setups. |
+| **Confirmación M1** | `M1_CONFIRMATION_ENABLED` | Exige una vela de desplazamiento en M1 tras el cierre de la vela M5 del setup. Usa la vela M1 para refinar el precio de entrada; el SL sigue basado en la vela del sweep en M5. |
 
 ## Gestión de posiciones
 
@@ -419,7 +427,8 @@ npm test
 | `MAX_DAILY_TRADES` | Máximo de trades por día (`0` = sin límite) | `0` |
 | `MIN_FVG_POINTS` | Tamaño mínimo del FVG en puntos para aceptar la entrada (`0` = sin filtro) | `0` |
 | `PARTIAL_TP_ENABLED` | `true` para cerrar 50% en 1R y dejar correr el resto | `false` |
-| `M15_CONFIRMATION_ENABLED` | `true` para exigir sesgo M15 alineado con H1 antes de entrar | `false` |
+| `M15_CONFIRMATION_ENABLED` | `true` para exigir sesgo M15 alineado con D1 antes de entrar | `false` |
+| `M1_CONFIRMATION_ENABLED` | `true` para exigir vela de desplazamiento M1 tras el setup M5; refina el precio de entrada | `false` |
 | `SEMI_AUTO_MODE` | `true` para enviar alerta de Telegram con botones antes de ejecutar (requiere reinicio) | `false` |
 | `TELEGRAM_ENABLED` | `false` para silenciar notificaciones | `true` |
 | `LICENSE_KEY` | UUID de licencia (también editable en dashboard) | — |

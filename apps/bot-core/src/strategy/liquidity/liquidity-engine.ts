@@ -36,12 +36,17 @@ export class LiquidityEngine extends EventEmitter {
   }
 
   analyzeCandle(candle: Candle) {
+    const prevCandle = this.candles.length > 0
+      ? this.candles[this.candles.length - 1]
+      : undefined;
+
     this.candles.push(candle);
 
     const sweeps =
       this.sweepDetector.detect(
         this.clusters,
         candle,
+        prevCandle,
       );
 
     for (const sweep of sweeps) {

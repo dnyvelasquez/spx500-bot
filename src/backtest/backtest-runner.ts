@@ -39,6 +39,7 @@ export interface BacktestParams {
   minFvgPoints: number;
   minSlPoints: number;
   m15ConfirmationEnabled: boolean;
+  m1ConfirmationEnabled: boolean;
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ function computeMetrics(trades: BacktestTrade[], initialBalance: number): Backte
 export async function runBacktest(params: BacktestParams): Promise<BacktestReport> {
   const {
     symbol, from, to, initialBalance, riskPercent, cooldownMinutes,
-    blockedHours, minFvgPoints, minSlPoints, m15ConfirmationEnabled,
+    blockedHours, minFvgPoints, minSlPoints, m15ConfirmationEnabled, m1ConfirmationEnabled,
   } = params;
 
   // Fetch starts WARM_UP_DAYS before `from` so the engine has context on day 1
@@ -206,19 +207,23 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
 
   console.log(`\nFetching candles for ${symbol}  (${fetchFromStr} → ${fetchToStr})...`);
 
-  const [m5Candles, h1Candles, m15Candles, d1Candles] = await Promise.all([
+  const [m5Candles, h1Candles, m15Candles, d1Candles, m1Candles] = await Promise.all([
     fetchCandles(symbol, 'M5', fetchFromStr, fetchToStr),
     fetchCandles(symbol, 'H1', fetchFromStr, fetchToStr),
     m15ConfirmationEnabled
       ? fetchCandles(symbol, 'M15', fetchFromStr, fetchToStr)
       : Promise.resolve([] as Candle[]),
     fetchCandles(symbol, 'D1', d1FetchFromStr, fetchToStr),
+    m1ConfirmationEnabled
+      ? fetchCandles(symbol, 'M1', fetchFromStr, fetchToStr)
+      : Promise.resolve([] as Candle[]),
   ]);
 
   console.log(`  M5:  ${m5Candles.length} candles`);
   console.log(`  H1:  ${h1Candles.length} candles`);
   if (m15ConfirmationEnabled) console.log(`  M15: ${m15Candles.length} candles`);
   console.log(`  D1:  ${d1Candles.length} candles`);
+  if (m1ConfirmationEnabled) console.log(`  M1:  ${m1Candles.length} candles`);
 
   // ── Strategy engine ─────────────────────────────────────────────────────────
   const strategy = new StrategyEngine();
@@ -245,6 +250,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   let h1Ptr = 0;
   let m15Ptr = 0;
   let d1Ptr = 0;
+  let m1Ptr = 0;
 
   console.log(`\nReplaying ${m5Candles.length} M5 candles...`);
 
@@ -277,6 +283,13 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     if (m15ConfirmationEnabled) {
       while (m15Ptr < m15Candles.length && m15Candles[m15Ptr]!.time + 900 <= currentTime) {
         m15Ptr++;
+      }
+    }
+
+    // ── Advance M1 pointer ──────────────────────────────────────────────────
+    if (m1ConfirmationEnabled) {
+      while (m1Ptr < m1Candles.length && m1Candles[m1Ptr]!.time + 60 <= currentTime) {
+        m1Ptr++;
       }
     }
 
@@ -336,13 +349,35 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
       if (fvg && minFvgPoints > 0 && fvg.size < minFvgPoints) continue;
 
       // ── Price levels ──────────────────────────────────────────────────────
-      // FVG validates setup quality; execution is always market, not limit at FVG midpoint
-      const entryPrice = candle.close;
+      let entryPrice: number;
+      let stopLoss: number;
+
+      // SL always based on M5 sweep candle — wide enough to survive intraday noise
       const sweepRange = signal.sweep.sweepCandleHigh - signal.sweep.sweepCandleLow;
-      const buffer = sweepRange * SL_BUFFER_RATIO;
-      const stopLoss = dir === 'BULLISH'
-        ? signal.sweep.sweepCandleLow - buffer
-        : signal.sweep.sweepCandleHigh + buffer;
+      const sweepBuffer = sweepRange * SL_BUFFER_RATIO;
+      stopLoss = dir === 'BULLISH'
+        ? signal.sweep.sweepCandleLow - sweepBuffer
+        : signal.sweep.sweepCandleHigh + sweepBuffer;
+
+      if (m1ConfirmationEnabled) {
+        // M1 confirms momentum is already moving in signal direction after M5 signal fires.
+        // Entry uses M1 displacement candle close; SL stays at M5 sweep candle level.
+        const m5CloseTime = candle.time + 300;
+        let m1SearchPtr = m1Ptr;
+        while (m1SearchPtr < m1Candles.length && m1Candles[m1SearchPtr]!.time < m5CloseTime) {
+          m1SearchPtr++;
+        }
+        const m1Window = m1Candles.slice(m1SearchPtr, m1SearchPtr + 5);
+        const m1Disp = m1Window.find(c => {
+          const d = displacementDetector.detect(c);
+          return d?.direction === dir;
+        });
+        if (!m1Disp) continue;
+        entryPrice = m1Disp.close;
+      } else {
+        entryPrice = candle.close;
+      }
+
       const slDist = Math.abs(entryPrice - stopLoss);
       if (minSlPoints > 0 && slDist < minSlPoints) continue;
 

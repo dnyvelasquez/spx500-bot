@@ -29,6 +29,7 @@ interface BotConfig {
   MIN_SL_POINTS?: number;
   PARTIAL_TP_ENABLED?: boolean;
   M15_CONFIRMATION_ENABLED?: boolean;
+  M1_CONFIRMATION_ENABLED?: boolean;
   SEMI_AUTO_MODE?: boolean;
 }
 
@@ -57,6 +58,7 @@ class ConfigService {
   get minSlPoints(): number { return this.config.MIN_SL_POINTS ?? 0; }
   get partialTpEnabled(): boolean { return this.config.PARTIAL_TP_ENABLED ?? false; }
   get m15ConfirmationEnabled(): boolean { return this.config.M15_CONFIRMATION_ENABLED ?? false; }
+  get m1ConfirmationEnabled(): boolean { return this.config.M1_CONFIRMATION_ENABLED ?? false; }
   get semiAutoMode(): boolean { return this.config.SEMI_AUTO_MODE ?? false; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env

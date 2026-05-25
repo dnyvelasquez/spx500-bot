@@ -142,6 +142,7 @@ async function main(): Promise<void> {
     minFvgPoints: (cfg['MIN_FVG_POINTS'] as number | undefined) ?? 0,
     minSlPoints: (cfg['MIN_SL_POINTS'] as number | undefined) ?? 0,
     m15ConfirmationEnabled: (cfg['M15_CONFIRMATION_ENABLED'] as boolean | undefined) ?? false,
+    m1ConfirmationEnabled: (cfg['M1_CONFIRMATION_ENABLED'] as boolean | undefined) ?? false,
   });
 
   printReport(report);

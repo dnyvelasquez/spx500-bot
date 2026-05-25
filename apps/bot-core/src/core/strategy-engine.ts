@@ -5,6 +5,9 @@ import { Candle } from '../types/market.types';
 import { LiquidityEngine } from '../strategy/liquidity/liquidity-engine';
 
 import { MSSDetector } from '../strategy/mss/mss-detector';
+import { SwingDetector } from '../strategy/structure/swing-detector';
+
+const SWING_LOOKBACK = 30;
 
 export class StrategyEngine extends EventEmitter {
   private readonly liquidityEngine =
@@ -12,6 +15,9 @@ export class StrategyEngine extends EventEmitter {
 
   private readonly mssDetector =
     new MSSDetector();
+
+  private readonly swingDetector =
+    new SwingDetector();
 
   initialize() {
     this.liquidityEngine.on(
@@ -29,50 +35,28 @@ export class StrategyEngine extends EventEmitter {
         const currentCandle =
           candles[candles.length - 1];
 
-        // Bearish MSS
-        if (
-          sweep.direction ===
-          'bearish'
-        ) {
-          const referenceSwing =
-            candles[
-              candles.length - 3
-            ];
+        const recentCandles = candles.slice(-SWING_LOOKBACK) as Parameters<SwingDetector['detectSwings']>[0];
+        const swings = this.swingDetector.detectSwings(recentCandles);
+        const reversedSwings = [...swings].reverse();
 
-          mss =
-            this.mssDetector.detectBearishMSS(
-              currentCandle,
-              {
-                price:
-                  referenceSwing.low,
-
-                time:
-                  referenceSwing.time,
-              },
-            );
+        // Bearish MSS — break below last real swing low
+        if (sweep.direction === 'bearish') {
+          const lastSwingLow = reversedSwings.find(s => s.type === 'LOW');
+          if (!lastSwingLow) return;
+          mss = this.mssDetector.detectBearishMSS(currentCandle, {
+            price: lastSwingLow.price,
+            time: lastSwingLow.time,
+          });
         }
 
-        // Bullish MSS
-        if (
-          sweep.direction ===
-          'bullish'
-        ) {
-          const referenceSwing =
-            candles[
-              candles.length - 3
-            ];
-
-          mss =
-            this.mssDetector.detectBullishMSS(
-              currentCandle,
-              {
-                price:
-                  referenceSwing.high,
-
-                time:
-                  referenceSwing.time,
-              },
-            );
+        // Bullish MSS — break above last real swing high
+        if (sweep.direction === 'bullish') {
+          const lastSwingHigh = reversedSwings.find(s => s.type === 'HIGH');
+          if (!lastSwingHigh) return;
+          mss = this.mssDetector.detectBullishMSS(currentCandle, {
+            price: lastSwingHigh.price,
+            time: lastSwingHigh.time,
+          });
         }
 
         if (mss) {
