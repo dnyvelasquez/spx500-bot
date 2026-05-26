@@ -570,6 +570,11 @@ export class Application {
   }
 
   private evaluateEMAPullbackSignal(symbol: string): ZoneTradeSignal | null {
+    if (configService.epSkipMonday) {
+      const dayET = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(new Date());
+      if (dayET === 'Mon') return null;
+    }
+
     const h1 = this.marketData.getCandles(symbol, 'H1');
     const m15 = this.marketData.getCandles(symbol, 'M15');
     const m5 = this.marketData.getCandles(symbol, 'M5');

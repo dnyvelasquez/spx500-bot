@@ -153,6 +153,11 @@ async function main(): Promise<void> {
   const beAtRaw      = parseFloat(args['be-at-points'] ?? String(cfg['BE_AT_POINTS'] ?? 0));
   const beAtPoints   = beMode === '1r' ? -1 : beAtRaw;
   const partialTp    = (args['partial-tp'] ?? String(cfg['PARTIAL_TP_ENABLED'] ?? 'false')) === 'true';
+  const enableZB       = (args['zb'] ?? 'true') !== 'false';
+  const enableEP       = (args['ep'] ?? 'true') !== 'false';
+  const epMinSlPoints  = parseFloat(args['ep-min-sl'] ?? String(cfg['EP_MIN_SL_POINTS'] ?? 0));
+  const epSkipMonday   = (args['ep-skip-monday'] ?? String(cfg['EP_SKIP_MONDAY'] ?? 'false')) === 'true';
+  const epMinHour      = parseInt(args['ep-min-hour'] ?? String(cfg['EP_MIN_HOUR'] ?? 0), 10);
 
   if (!from || !to) {
     console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
@@ -179,6 +184,11 @@ async function main(): Promise<void> {
     beAtPoints,
     beBuffer:   (cfg['BE_BUFFER_POINTS'] as number | undefined) ?? 0,
     partialTpEnabled: partialTp,
+    enableZB,
+    enableEP,
+    epMinSlPoints,
+    epSkipMonday,
+    epMinHour,
   });
 
   printReport(report);

@@ -49,6 +49,11 @@ export interface BacktestParams {
   beAtPoints: number;   // 0=off, -1=1R mode, >0=fixed points
   beBuffer: number;
   partialTpEnabled: boolean;
+  enableZB?: boolean;
+  enableEP?: boolean;
+  epMinSlPoints?: number;
+  epSkipMonday?: boolean;
+  epMinHour?: number;
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -236,6 +241,8 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     emaSpreadMin, epUseM15Align, epUseMacdSlope,
     maxDailyDrawdownPct, maxConsecLosses,
     beAtPoints, beBuffer, partialTpEnabled,
+    enableZB = true, enableEP = true,
+    epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0,
   } = params;
 
   const fetchFrom = new Date(from + 'T00:00:00');
@@ -412,8 +419,15 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
 
   function evalEMAPullback(
     h1: Candle[], m15: Candle[], m5All: Candle[], i: number,
-    useM15Align: boolean, useMacdSlope: boolean,
+    useM15Align: boolean, useMacdSlope: boolean, candleTs: number,
   ): SignalCandidate | null {
+    // EP-specific filters: Monday and early-session exclusions
+    if (epSkipMonday || epMinHour > 0) {
+      const dtET = new Date(candleTs * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hour12: false });
+      const [weekday, hourStr] = dtET.split(', ');
+      if (epSkipMonday && weekday === 'Mon') return null;
+      if (epMinHour > 0 && parseInt(hourStr ?? '0', 10) < epMinHour) return null;
+    }
     if (h1.length < 40 || m15.length < 40) return null;
 
     // Trend direction from H1 EMA 8 vs EMA 34
@@ -463,6 +477,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
       : m15Ema34 + zoneSlBufferPoints;
     const slDist = Math.abs(entryPrice - stopLoss);
     if (minSlPoints > 0 && slDist < minSlPoints) return null;
+    if (epMinSlPoints > 0 && slDist < epMinSlPoints) return null;
 
     return {
       signalType: 'EMA_PB',
@@ -531,8 +546,9 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     const m15Window = m15Candles.slice(0, m15Ptr);
 
     // ── Evaluar señal: ZB primero, EMA Pullback como fallback ────────────────
-    const signal = evalZoneBounce(d1Window, h4Window, h1Window, m15Window, m5Candles, i)
-      ?? evalEMAPullback(h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope);
+    const signal =
+      (enableZB ? evalZoneBounce(d1Window, h4Window, h1Window, m15Window, m5Candles, i) : null) ??
+      (enableEP ? evalEMAPullback(h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope, candle.time) : null);
 
     if (!signal) continue;
 
