@@ -50,8 +50,8 @@ export class PositionMonitor {
       }
     }
 
-    // Break-even: precio se movió ≥ beAtPoints → SL a entrada + beBuffer
-    if (profitPoints >= this.beAtPoints) {
+    // Break-even: precio se movió ≥ beAtPoints → SL a entrada + beBuffer (0 = desactivado)
+    if (this.beAtPoints > 0 && profitPoints >= this.beAtPoints) {
       const beSL =
         position.type === 'BUY'
           ? position.priceOpen + this.beBuffer

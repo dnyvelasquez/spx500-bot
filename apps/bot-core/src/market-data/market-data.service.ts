@@ -91,10 +91,10 @@ export class MarketDataService {
     symbol: string,
     timeframe: string
   ) {
-
-    return this.cache.get(
-      `${symbol}_${timeframe}`
-    );
+    const candles = this.cache.get(`${symbol}_${timeframe}`);
+    // Exclude the last (forming) candle so signal evaluation
+    // only uses closed candles — consistent with backtest behavior.
+    return candles.length > 1 ? candles.slice(0, -1) : candles;
   }
 
   async syncSymbol(
