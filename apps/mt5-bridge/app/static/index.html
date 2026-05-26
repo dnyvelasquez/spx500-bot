@@ -523,17 +523,6 @@
   </div>
 
   <div class="field">
-    <label for="max-profit">Objetivo de ganancia diaria (%)</label>
-    <div class="limit-row">
-      <input type="number" id="max-profit" min="0.5" max="20" step="0.5" />
-      <div class="gauge-wrap">
-        <div class="gauge-track"><div class="gauge-fill" id="gf-profit"></div></div>
-        <span class="gauge-lbl" id="gl-profit">—</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="field">
     <label for="max-weekly-drawdown">Pérdida máxima semanal (%)</label>
     <div class="limit-row">
       <input type="number" id="max-weekly-drawdown" min="0.5" max="30" step="0.5" />
@@ -791,7 +780,6 @@
 
       if (d.metrics) {
         updateGauge('drawdown', d.metrics.dailyDrawdownPct,  d.metrics.maxDailyDrawdown);
-        updateGauge('profit',   d.metrics.dailyProfitPct,    d.metrics.maxDailyProfit);
         updateGauge('weekly',   d.metrics.weeklyDrawdownPct, d.metrics.maxWeeklyDrawdown);
         updateTradesGauge(d.metrics.dailyTrades ?? 0, d.metrics.maxDailyTrades ?? 0);
         updateConsecGauge(d.metrics.consecStreak ?? 0, d.metrics.maxConsecLosses ?? 0);
@@ -850,7 +838,6 @@
     $('symbol').value       = cfg.SYMBOL ?? 'SPX500';
     $('risk').value         = cfg.RISK_PERCENT ?? 1;
     $('cooldown').value     = cfg.SIGNAL_COOLDOWN_MINUTES ?? 30;
-    $('max-profit').value          = cfg.MAX_DAILY_PROFIT_PERCENT ?? 3;
     $('max-weekly-drawdown').value = cfg.MAX_WEEKLY_DRAWDOWN_PERCENT ?? 5;
     $('max-daily-trades').value    = cfg.MAX_DAILY_TRADES ?? 0;
     $('min-sl-points').value       = cfg.MIN_SL_POINTS ?? 0;
@@ -885,7 +872,6 @@
       LIVE_TRADING:                $('live-trading').checked,
       SIGNAL_COOLDOWN_MINUTES:     parseInt($('cooldown').value, 10),
       MAX_DAILY_DRAWDOWN_PERCENT:  original.MAX_DAILY_DRAWDOWN_PERCENT ?? 2.0,
-      MAX_DAILY_PROFIT_PERCENT:    parseFloat($('max-profit').value),
       MAX_WEEKLY_DRAWDOWN_PERCENT: parseFloat($('max-weekly-drawdown').value),
       MAX_DAILY_TRADES:            parseInt($('max-daily-trades').value, 10) || 0,
       MIN_SL_POINTS:               parseFloat($('min-sl-points').value) || 0,
@@ -905,9 +891,6 @@
     }
     if (isNaN(payload.SIGNAL_COOLDOWN_MINUTES) || payload.SIGNAL_COOLDOWN_MINUTES < 1) {
       toast('Cooldown mínimo: 1 minuto', 'err'); return;
-    }
-    if (isNaN(payload.MAX_DAILY_PROFIT_PERCENT) || payload.MAX_DAILY_PROFIT_PERCENT < 0.5) {
-      toast('Objetivo de ganancia mínimo: 0.5%', 'err'); return;
     }
     if (isNaN(payload.MAX_WEEKLY_DRAWDOWN_PERCENT) || payload.MAX_WEEKLY_DRAWDOWN_PERCENT < 0.5) {
       toast('Pérdida semanal mínima: 0.5%', 'err'); return;

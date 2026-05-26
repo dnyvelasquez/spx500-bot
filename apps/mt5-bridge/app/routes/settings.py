@@ -31,7 +31,7 @@ def get_bot_status():
         age = (datetime.now(timezone.utc) - updated).total_seconds()
         if age > 30:
             return {"available": False, "ready": False, "reason": "Bot sin actividad reciente", "age": round(age)}
-        return {"available": True, "ready": data.get("ready", False), "reason": data.get("reason"), "age": round(age)}
+        return {"available": True, "ready": data.get("ready", False), "reason": data.get("reason"), "age": round(age), "metrics": data.get("metrics")}
     except FileNotFoundError:
         return {"available": False, "ready": False, "reason": "Bot no disponible"}
     except Exception as exc:
@@ -61,16 +61,22 @@ class BotSettings(BaseModel):
     RISK_PERCENT: float = Field(default=1.0, ge=0.1, le=10.0)
     LIVE_TRADING: bool = Field(default=False)
     SIGNAL_COOLDOWN_MINUTES: int = Field(default=30, ge=1, le=1440)
-    MAX_DAILY_DRAWDOWN_PERCENT: float = Field(default=3.0, ge=0.5, le=20.0)
+    MAX_DAILY_DRAWDOWN_PERCENT: float = Field(default=2.0, ge=0.5, le=20.0)
+    MAX_WEEKLY_DRAWDOWN_PERCENT: float = Field(default=5.0, ge=0.5, le=30.0)
+    MAX_DAILY_TRADES: int = Field(default=0, ge=0, le=50)
+    MAX_CONSEC_LOSSES: int = Field(default=0, ge=0, le=10)
     TELEGRAM_ENABLED: bool = Field(default=True)
     LICENSE_KEY: str = Field(default="")
     BLOCKED_HOURS: List[BlockedWindow] = Field(default_factory=lambda: [BlockedWindow(**{"from": w["from"], "to": w["to"], "label": w["label"]}) for w in DEFAULT_BLOCKED_HOURS])
-    MAX_DAILY_PROFIT_PERCENT: float = Field(default=3.0, ge=0.5, le=20.0)
-    MAX_WEEKLY_DRAWDOWN_PERCENT: float = Field(default=5.0, ge=0.5, le=30.0)
-    MAX_DAILY_TRADES: int = Field(default=0, ge=0, le=50)
+    MIN_SL_POINTS: float = Field(default=0.0, ge=0.0, le=500.0)
     MIN_FVG_POINTS: float = Field(default=0.0, ge=0.0, le=500.0)
+    ZONE_PROXIMITY_POINTS: float = Field(default=20.0, ge=1.0, le=500.0)
+    ZONE_SL_BUFFER_POINTS: float = Field(default=8.0, ge=0.0, le=100.0)
+    EMA_SPREAD_MIN: float = Field(default=0.0, ge=0.0, le=200.0)
+    EP_M15_ALIGN: bool = Field(default=True)
+    BE_AT_POINTS: float = Field(default=0.0, ge=0.0, le=500.0)
+    BE_BUFFER_POINTS: float = Field(default=0.25, ge=0.0, le=50.0)
     PARTIAL_TP_ENABLED: bool = Field(default=False)
-    M15_CONFIRMATION_ENABLED: bool = Field(default=False)
     SEMI_AUTO_MODE: bool = Field(default=False)
 
 
