@@ -35,8 +35,6 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 │    ├─ NewsFilterService      (bloqueo ±1 min noticias)   │
 │    ├─ SessionGuard           (horarios bloqueados en ET) │
 │    ├─ DailyDrawdownGuard     (límite % pérdida diaria)   │
-│    ├─ DailyProfitTargetGuard (objetivo % ganancia diaria)│
-│    ├─ WeeklyDrawdownGuard    (límite % pérdida semanal)  │
 │    ├─ DailyTradeCountGuard   (máximo trades por día)     │
 │    └─ ConsecLossGuard        (circuit breaker racha de pérdidas)│
 │                                                          │
@@ -81,9 +79,7 @@ Antes de ejecutar cualquier orden, el bot pasa por los siguientes filtros en est
 |---|---|
 | **News filter** | Bloquea señales ±1 minuto alrededor de noticias USD de alto impacto (Forex Factory). Se refresca cada día a medianoche UTC. |
 | **Session guard** | Bloquea señales fuera de las ventanas horarias permitidas (ver tabla abajo). Usa hora ET con soporte automático de DST. |
-| **Daily drawdown** | Si la pérdida del día supera `MAX_DAILY_DRAWDOWN_PERCENT` (default 3%), no se abren más posiciones hasta el día siguiente. |
-| **Daily profit target** | Si la ganancia del día supera `MAX_DAILY_PROFIT_PERCENT` (default 3%), no se abren más posiciones. Protege las ganancias. |
-| **Weekly drawdown** | Si la pérdida de la semana supera `MAX_WEEKLY_DRAWDOWN_PERCENT` (default 5%), no se abren posiciones hasta el lunes siguiente. Referencia se resetea cada lunes. |
+| **Daily drawdown** | Si la pérdida del día supera `MAX_DAILY_DRAWDOWN_PERCENT` (default 2%), no se abren más posiciones hasta el día siguiente. |
 | **Daily trade limit** | Si el número de trades del día alcanza `MAX_DAILY_TRADES`, no se abren más posiciones. `0` = sin límite (default). Se resetea automáticamente a medianoche UTC. |
 | **Consecutive loss circuit** | Si se cierran `MAX_CONSEC_LOSSES` pérdidas seguidas en el mismo día ET, no se abren más posiciones hasta el día siguiente. `0` = desactivado (default). |
 | **Signal cooldown** | Mínimo `SIGNAL_COOLDOWN_MINUTES` (default 30) entre señales del mismo tipo para evitar sobreoperación. |
@@ -127,7 +123,7 @@ El bridge incluye un dashboard en `http://localhost:8000` con las siguientes sec
 - **Estado del bridge** — conexión MT5 (verde / rojo)
 - **Estado del bot** — semáforo en tiempo real con razón de bloqueo
 - **Licencia** — visualizar y validar la clave de licencia
-- **Configuración** — editar símbolo, riesgo, modo live, cooldown; límites de pérdida diaria/semanal y objetivo de ganancia diaria (con barras de progreso); máximo de trades diarios; filtros de entrada (SL mínimo, FVG mínimo, spread EMA mínimo, confirmación M15 para señal EP, circuit breaker de pérdidas consecutivas); gestión de posiciones (trigger break-even, buffer BE, toggle TP parcial); modo semi-automático. Hot-reload sin reiniciar el bot.
+- **Configuración** — editar símbolo, riesgo, modo live, cooldown; límite de pérdida diaria (con barra de progreso); máximo de trades diarios; filtros de entrada (SL mínimo, FVG mínimo, spread EMA mínimo, confirmación M15 para señal EP, circuit breaker de pérdidas consecutivas); gestión de posiciones (trigger break-even, buffer BE, toggle TP parcial); modo semi-automático. Hot-reload sin reiniciar el bot.
 - **Telegram** — configurar token y chat ID, toggle de notificaciones, botón de prueba
 - **Journal** — estadísticas (win rate, profit factor, avg R:R, P&L, rachas de pérdidas) + tabla de las últimas 20 operaciones con resultado y R:R real
 
@@ -135,7 +131,7 @@ El bridge incluye un dashboard en `http://localhost:8000` con las siguientes sec
 
 Los cambios guardados desde el dashboard se escriben en `config.json` en la raíz. El bot detecta el cambio automáticamente (sin reiniciar) vía `fs.watch`. Los parámetros con soporte hot-reload son:
 
-`SYMBOL`, `RISK_PERCENT`, `LIVE_TRADING`, `SIGNAL_COOLDOWN_MINUTES`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_DAILY_PROFIT_PERCENT`, `MAX_WEEKLY_DRAWDOWN_PERCENT`, `MAX_DAILY_TRADES`, `MIN_SL_POINTS`, `MIN_FVG_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `MAX_CONSEC_LOSSES`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `TELEGRAM_ENABLED`, `LICENSE_KEY`, `BLOCKED_HOURS`
+`SYMBOL`, `RISK_PERCENT`, `LIVE_TRADING`, `SIGNAL_COOLDOWN_MINUTES`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_DAILY_TRADES`, `MIN_SL_POINTS`, `MIN_FVG_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `MAX_CONSEC_LOSSES`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `TELEGRAM_ENABLED`, `LICENSE_KEY`, `BLOCKED_HOURS`
 
 > `SEMI_AUTO_MODE` **no** aplica hot-reload — requiere reiniciar el bot para activar el polling de Telegram.
 
@@ -263,7 +259,7 @@ Parámetros disponibles:
 | `--cooldown` | Desde `config.json` | Minutos de cooldown entre señales |
 | `--proximity` | Desde `config.json` | Puntos de proximidad a zona HTF |
 
-Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS`, `MIN_SL_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_WEEKLY_DRAWDOWN_PERCENT` y `MAX_CONSEC_LOSSES` se leen automáticamente desde `config.json`.
+Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS`, `MIN_SL_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `MAX_DAILY_DRAWDOWN_PERCENT` y `MAX_CONSEC_LOSSES` se leen automáticamente desde `config.json`.
 
 ### Salida
 
@@ -298,8 +294,8 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | Aspecto | Comportamiento |
 |---|---|
 | Filtros activos | Session guard, cooldown, zona (D1/H4/H1 lookback 100c, M15 lookback 50c), sesgo multi-TF D1+H4+H1, impulso M15 BOS (50 candles), FVG size, SL mínimo |
-| Filtros simulados | Daily drawdown (`MAX_DAILY_DRAWDOWN_PERCENT`), weekly drawdown (`MAX_WEEKLY_DRAWDOWN_PERCENT`), consecutive loss circuit (`MAX_CONSEC_LOSSES`) |
-| Filtros omitidos | Profit target, daily trade count — el backtest evalúa señales sin esos cortes |
+| Filtros simulados | Daily drawdown (`MAX_DAILY_DRAWDOWN_PERCENT`), consecutive loss circuit (`MAX_CONSEC_LOSSES`) |
+| Filtros omitidos | Daily trade count — el backtest evalúa señales sin ese corte |
 | News filter | No simulado — requeriría datos históricos de noticias |
 | Entrada al mercado | Al cierre de la vela M5 del setup (precio de mercado), sin slippage |
 | SL | Más allá de la zona HTF activa + `ZONE_SL_BUFFER_POINTS` puntos de buffer |
@@ -378,7 +374,7 @@ El dashboard muestra en tiempo real si el bot puede operar y por qué está bloq
 | 🔴 Rojo | Bloqueado — muestra la razón exacta |
 | ⚫ Gris | Bot no disponible (apagado o sin actividad > 30s) |
 
-Razones posibles de bloqueo: horario bloqueado (NY Open / Lunch / Close / fuera de mercado), noticia USD de alto impacto, límite de pérdida diaria, objetivo de ganancia diaria, límite de pérdida semanal, máximo de trades diarios, cooldown activo, bridge MT5 no disponible.
+Razones posibles de bloqueo: horario bloqueado (NY Open / Lunch / Close / fuera de mercado), noticia USD de alto impacto, límite de pérdida diaria, circuit breaker de pérdidas consecutivas, máximo de trades diarios, cooldown activo, bridge MT5 no disponible.
 
 El bot escribe `bot-status.json` en cada ciclo de sync (10s). El dashboard lo consulta cada 10s vía `GET /api/status`. Las barras de progreso de los límites se actualizan al mismo tiempo.
 
@@ -442,9 +438,7 @@ npm test
 | `RISK_PERCENT` | % del balance a arriesgar por trade | `1` |
 | `LIVE_TRADING` | `true` para ejecutar órdenes reales | `false` |
 | `SIGNAL_COOLDOWN_MINUTES` | Minutos entre señales del mismo tipo | `30` |
-| `MAX_DAILY_DRAWDOWN_PERCENT` | % máximo de pérdida diaria permitida | `3` |
-| `MAX_DAILY_PROFIT_PERCENT` | % objetivo de ganancia diaria (para al alcanzarlo) | `3` |
-| `MAX_WEEKLY_DRAWDOWN_PERCENT` | % máximo de pérdida semanal permitida (resetea el lunes) | `5` |
+| `MAX_DAILY_DRAWDOWN_PERCENT` | % máximo de pérdida diaria permitida | `2` |
 | `MAX_DAILY_TRADES` | Máximo de trades por día (`0` = sin límite) | `0` |
 | `MIN_SL_POINTS` | Distancia mínima entry→SL en puntos para aceptar el setup (`0` = sin filtro) | `0` |
 | `MIN_FVG_POINTS` | Tamaño mínimo del FVG en puntos para aceptar la entrada (`0` = sin filtro) | `0` |
