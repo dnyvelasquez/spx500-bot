@@ -28,9 +28,14 @@ interface BotConfig {
   MIN_FVG_POINTS?: number;
   MIN_SL_POINTS?: number;
   PARTIAL_TP_ENABLED?: boolean;
-  M15_CONFIRMATION_ENABLED?: boolean;
-  M1_CONFIRMATION_ENABLED?: boolean;
   SEMI_AUTO_MODE?: boolean;
+  ZONE_PROXIMITY_POINTS?: number;
+  ZONE_SL_BUFFER_POINTS?: number;
+  BE_AT_POINTS?: number;
+  BE_BUFFER_POINTS?: number;
+  MAX_CONSEC_LOSSES?: number;
+  EMA_SPREAD_MIN?: number;
+  EP_M15_ALIGN?: boolean;
 }
 
 const CONFIG_PATH = path.resolve(__dirname, '..', '..', 'config.json');
@@ -57,9 +62,14 @@ class ConfigService {
   get minFvgPoints(): number { return this.config.MIN_FVG_POINTS ?? 0; }
   get minSlPoints(): number { return this.config.MIN_SL_POINTS ?? 0; }
   get partialTpEnabled(): boolean { return this.config.PARTIAL_TP_ENABLED ?? false; }
-  get m15ConfirmationEnabled(): boolean { return this.config.M15_CONFIRMATION_ENABLED ?? false; }
-  get m1ConfirmationEnabled(): boolean { return this.config.M1_CONFIRMATION_ENABLED ?? false; }
   get semiAutoMode(): boolean { return this.config.SEMI_AUTO_MODE ?? false; }
+  get zoneProximityPoints(): number { return this.config.ZONE_PROXIMITY_POINTS ?? 20; }
+  get zoneSlBufferPoints(): number { return this.config.ZONE_SL_BUFFER_POINTS ?? 5; }
+  get beAtPoints(): number { return this.config.BE_AT_POINTS ?? 8; }
+  get beBufferPoints(): number { return this.config.BE_BUFFER_POINTS ?? 0.25; }
+  get maxConsecLosses(): number { return this.config.MAX_CONSEC_LOSSES ?? 0; }
+  get emaSpreadMin(): number { return this.config.EMA_SPREAD_MIN ?? 0; }
+  get epM15Align(): boolean { return this.config.EP_M15_ALIGN ?? true; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env
   get licenseKey(): string | undefined {

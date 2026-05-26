@@ -6,6 +6,7 @@ import { DailyDrawdownGuard } from '@infra/risk/daily-drawdown.guard';
 import { DailyProfitTargetGuard } from '@infra/risk/daily-profit-target.guard';
 import { WeeklyDrawdownGuard } from '@infra/risk/weekly-drawdown.guard';
 import { DailyTradeCountGuard } from '@infra/risk/daily-trade-count.guard';
+import { ConsecLossGuard } from '@infra/risk/consec-loss.guard';
 import { SessionGuard } from '@infra/session/session-guard';
 import { TradeJournalService } from '@infra/journal/trade-journal.service';
 import { BotStatusService } from '@infra/status/bot-status.service';
@@ -14,41 +15,59 @@ import { env } from '@config/env';
 import { configService } from '@config/config-service';
 
 import { MarketDataService } from '@bot-core/market-data/market-data.service';
-import { StrategyEngine } from '@bot-core/core/strategy-engine';
-import { marketEvents } from '@bot-core/market-data/market-events';
 import { BiasEngine } from '@bot-core/strategy/bias/bias-engine';
-import { detectEqualHighs, detectEqualLows } from '@bot-core/strategy/liquidity/equal-levels';
+import { ZoneEngine } from '@bot-core/strategy/zones/zone-engine';
+import { MomentumEngine } from '@bot-core/strategy/momentum/momentum-engine';
+import { BreakoutEngine } from '@bot-core/strategy/breakout/breakout-engine';
 import { FVGDetector } from '@bot-core/strategy/fvg/fvg-detector';
 import { DisplacementDetector } from '@bot-core/strategy/fvg/displacement-detector';
 import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
+import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
+import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
 import { ExecutionValidator } from '@bot-core/services/execution/execution-validator';
 import { MT5Executor } from '@bot-core/services/execution/mt5-executor';
 import { PositionMonitor } from '@bot-core/services/execution/position-monitor';
 import { MT5Service } from '@bot-core/services/mt5/mt5.service';
 
-import type { LiquidityLevel, LiquiditySweep } from '@bot-core/strategy/liquidity/liquidity.types';
-import type { MSS } from '@bot-core/strategy/mss/mss-types';
+import type { SRZone } from '@bot-core/strategy/zones/zone-types';
+import type { MomentumSignal } from '@bot-core/strategy/momentum/momentum-types';
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_VOLUME = 20.0;
 const MIN_VOLUME = 0.1;
-const SL_BUFFER_RATIO = 0.1;
+
+interface ZoneTradeSignal {
+  direction: 'BULLISH' | 'BEARISH';
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  activeZone: SRZone;
+  momentum: MomentumSignal;
+  signalType?: 'ZONE' | 'EMA_PB';
+}
 
 export class Application {
   private readonly telegramService: TelegramService;
   private readonly marketData: MarketDataService;
-  private readonly strategy: StrategyEngine;
   private readonly mt5: MT5Service;
 
   private readonly biasEngine = new BiasEngine();
+  private readonly zoneEngine = new ZoneEngine();
+  private readonly momentumEngine = new MomentumEngine();
+  private readonly breakoutEngine = new BreakoutEngine();
   private readonly fvgDetector = new FVGDetector();
   private readonly displacementDetector = new DisplacementDetector();
   private readonly entryValidator = new EntryValidator();
+  private readonly emaEngine = new EMAEngine();
+  private readonly macdEngine = new MACDEngine();
   private readonly positionSizing = new PositionSizing();
   private readonly executionValidator = new ExecutionValidator();
   private readonly executor = new MT5Executor();
-  private readonly positionMonitor = new PositionMonitor();
+  private readonly positionMonitor = new PositionMonitor(
+    configService.beAtPoints,
+    configService.beBufferPoints,
+  );
 
   private readonly licenseService = new LicenseService();
   private readonly newsFilter = new NewsFilterService();
@@ -56,6 +75,7 @@ export class Application {
   private readonly profitTargetGuard = new DailyProfitTargetGuard();
   private readonly weeklyDrawdownGuard = new WeeklyDrawdownGuard();
   private readonly dailyTradeCountGuard = new DailyTradeCountGuard();
+  private readonly consecLossGuard = new ConsecLossGuard();
   private readonly sessionGuard = new SessionGuard();
   private readonly journal = new TradeJournalService();
   private readonly statusService = new BotStatusService();
@@ -71,7 +91,6 @@ export class Application {
   constructor() {
     this.telegramService = new TelegramService();
     this.marketData = new MarketDataService();
-    this.strategy = new StrategyEngine();
     this.mt5 = new MT5Service();
   }
 
@@ -85,18 +104,6 @@ export class Application {
     await this.newsFilter.initialize();
 
     await this.telegramService.initialize();
-
-    this.strategy.initialize();
-
-    this.strategy.on('mssConfirmed', ({ sweep, mss }: { sweep: LiquiditySweep; mss: MSS }) => {
-      this.onMssConfirmed(sweep, mss).catch((err: unknown) =>
-        logger.error(err, 'Error processing MSS signal'),
-      );
-    });
-
-    marketEvents.on('new-candle', ({ candle }: { candle: any }) => {
-      this.strategy.processCandle(candle);
-    });
 
     await this.sync();
 
@@ -155,16 +162,24 @@ export class Application {
     const symbol = configService.symbol;
     try {
       await this.marketData.syncSymbol(symbol);
-      const levels = this.refreshLiquidityLevels();
 
-      const m1 = this.marketData.getCandles(symbol, 'M1').length;
+      const m5 = this.marketData.getCandles(symbol, 'M5').length;
       const h1 = this.marketData.getCandles(symbol, 'H1').length;
+      const h4 = this.marketData.getCandles(symbol, 'H4').length;
+      const d1 = this.marketData.getCandles(symbol, 'D1').length;
 
-      const isOpen = m1 > 0;
+      const isOpen = m5 > 0;
 
       if (isOpen) {
-        logger.info({ symbol, m1, h1, levels }, 'Sync OK');
+        logger.info({ symbol, m5, h1, h4, d1 }, 'Sync OK');
         await this.monitorOpenPositions();
+
+        const signal = this.evaluateZoneSignal(symbol) ?? this.evaluateEMAPullbackSignal(symbol);
+        if (signal) {
+          await this.onZoneSignal(signal).catch((err: unknown) =>
+            logger.error(err, 'Error processing zone signal'),
+          );
+        }
       } else {
         logger.debug('Sync OK — no data (market closed)');
       }
@@ -177,6 +192,7 @@ export class Application {
           this.drawdownGuard.setReference(accountRes.data.balance);
           this.profitTargetGuard.setReference(accountRes.data.balance);
           this.weeklyDrawdownGuard.setReference(accountRes.data.balance);
+          this.consecLossGuard.resetDay();
         }
         await this.telegramService.notifyMarketOpen();
       } else if (!isOpen && this.marketOpen) {
@@ -265,20 +281,97 @@ export class Application {
     write(true, null);
   }
 
-  private refreshLiquidityLevels(): number {
-    const symbol = configService.symbol;
-    const m5Candles = this.marketData.getCandles(symbol, 'M5');
+  private evaluateZoneSignal(symbol: string): ZoneTradeSignal | null {
+    const d1 = this.marketData.getCandles(symbol, 'D1');
+    const h4 = this.marketData.getCandles(symbol, 'H4');
+    const h1 = this.marketData.getCandles(symbol, 'H1');
+    const m15 = this.marketData.getCandles(symbol, 'M15');
+    const m5 = this.marketData.getCandles(symbol, 'M5');
 
-    if (m5Candles.length < 20) return 0;
+    if (d1.length < 10 || h4.length < 10 || h1.length < 10 || m15.length < 10 || m5.length < 10) {
+      return null;
+    }
 
-    const levels: LiquidityLevel[] = [
-      ...detectEqualHighs(m5Candles),
-      ...detectEqualLows(m5Candles),
-    ];
+    const currentPrice = m5[m5.length - 1].close;
 
-    this.strategy.getLiquidityEngine().addLevels(levels);
+    // ── 1. Zona activa (D1 / H4 / H1) ────────────────────────────────────────
+    const zones = this.zoneEngine.getZones(d1, h4, h1, m15);
+    const activeZone = this.zoneEngine.findActiveZone(
+      zones,
+      currentPrice,
+      configService.zoneProximityPoints,
+    );
 
-    return levels.length;
+    if (!activeZone) return null;
+
+    // ── 2. Sesgo HTF multi-TF ─────────────────────────────────────────────────
+    const htfBias = this.biasEngine.analyzeMultiTF(d1, h4, h1);
+
+    if (htfBias === 'RANGE') return null;
+
+    // Zona debe coincidir con el sesgo
+    const zoneAligned =
+      (htfBias === 'BULLISH' && activeZone.type === 'SUPPORT') ||
+      (htfBias === 'BEARISH' && activeZone.type === 'RESISTANCE');
+
+    if (!zoneAligned) return null;
+
+    // ── 3. Momentum M15 ───────────────────────────────────────────────────────
+    const momentum = this.momentumEngine.analyze(m15);
+
+    if (momentum.direction === 'NEUTRAL' || momentum.direction !== htfBias) return null;
+
+    // ── 4. FVG y desplazamiento en M5 ────────────────────────────────────────
+    const fvgWindow = m5.slice(-7);
+    let fvg = null;
+    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
+      const slice = fvgWindow.slice(k - 2, k + 1);
+      fvg = htfBias === 'BULLISH'
+        ? this.fvgDetector.detectBullish(slice)
+        : this.fvgDetector.detectBearish(slice);
+    }
+
+    if (fvg && configService.minFvgPoints > 0 && fvg.size < configService.minFvgPoints) {
+      return null;
+    }
+
+    const dispWindow = m5.slice(-5);
+    const displacement = dispWindow.map(c => this.displacementDetector.detect(c)).find(Boolean) ?? null;
+
+    // ── 5. Validación de condiciones ──────────────────────────────────────────
+    const valid = this.entryValidator.validate({
+      htfBias,
+      m15Momentum: momentum.direction,
+      hasDisplacement: !!displacement,
+      hasFVG: !!fvg,
+    });
+
+    if (!valid) {
+      logger.debug(
+        { htfBias, m15Momentum: momentum.direction, hasFVG: !!fvg, hasDisplacement: !!displacement },
+        'Signal rejected — conditions not met',
+      );
+      return null;
+    }
+
+    // ── 6. Niveles de precio ──────────────────────────────────────────────────
+    const entryPrice = m5[m5.length - 1].close;
+    const stopLoss = htfBias === 'BULLISH'
+      ? activeZone.level - configService.zoneSlBufferPoints
+      : activeZone.level + configService.zoneSlBufferPoints;
+
+    const slDistance = Math.abs(entryPrice - stopLoss);
+
+    if (configService.minSlPoints > 0 && slDistance < configService.minSlPoints) {
+      logger.debug({ slDistance: slDistance.toFixed(2), min: configService.minSlPoints }, 'Signal skipped — SL distance too small');
+      return null;
+    }
+
+    const takeProfit = htfBias === 'BULLISH'
+      ? entryPrice + slDistance * 2
+      : entryPrice - slDistance * 2;
+
+    return { direction: htfBias, entryPrice, stopLoss, takeProfit, activeZone, momentum };
   }
 
   private async monitorOpenPositions(): Promise<void> {
@@ -364,38 +457,196 @@ export class Application {
       const history = await this.mt5.getPositionHistory(ticket);
       if (history.success && history.data) {
         await this.journal.recordClose(ticket, history.data.closePrice, history.data.profit);
+        this.consecLossGuard.recordResult(history.data.profit);
       }
     } catch (err) {
       logger.warn({ ticket, err }, 'Could not fetch position history for journal');
     }
   }
 
-  private async onMssConfirmed(sweep: LiquiditySweep, mss: MSS): Promise<void> {
-    logger.info({ direction: mss.direction, brokenPrice: mss.brokenPrice }, 'MSS confirmed');
+  private evaluateBreakoutPullbackSignal(symbol: string): ZoneTradeSignal | null {
+    const d1 = this.marketData.getCandles(symbol, 'D1');
+    const h4 = this.marketData.getCandles(symbol, 'H4');
+    const h1 = this.marketData.getCandles(symbol, 'H1');
+    const m15 = this.marketData.getCandles(symbol, 'M15');
+    const m5 = this.marketData.getCandles(symbol, 'M5');
+
+    if (h4.length < 20 || h1.length < 20 || m15.length < 10 || m5.length < 10) return null;
+
+    const currentPrice = m5[m5.length - 1].close;
+
+    // ── 1. Zona rota reciente (pullback a nivel flipeado) ─────────────────────
+    const flippedZones = this.breakoutEngine.getFlippedZones(h4, h1);
+    const pullbackZone = this.breakoutEngine.findPullbackZone(
+      flippedZones,
+      currentPrice,
+      configService.zoneProximityPoints,
+    );
+
+    if (!pullbackZone) return null;
+
+    const direction = pullbackZone.direction;
+
+    // ── 2. Sesgo HTF confirma la dirección del breakout ───────────────────────
+    const htfBias = this.biasEngine.analyzeMultiTF(d1, h4, h1);
+    if (htfBias !== direction) return null;
+
+    // ── 3. Momentum M15 alineado ──────────────────────────────────────────────
+    const momentum = this.momentumEngine.analyze(m15);
+    if (momentum.direction !== direction) return null;
+
+    // ── 4. FVG y desplazamiento en M5 ────────────────────────────────────────
+    const fvgWindow = m5.slice(-7);
+    let fvg = null;
+    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
+      const slice = fvgWindow.slice(k - 2, k + 1);
+      fvg = direction === 'BULLISH'
+        ? this.fvgDetector.detectBullish(slice)
+        : this.fvgDetector.detectBearish(slice);
+    }
+
+    if (fvg && configService.minFvgPoints > 0 && fvg.size < configService.minFvgPoints) return null;
+
+    const dispWindow = m5.slice(-5);
+    const displacement = dispWindow.map(c => this.displacementDetector.detect(c)).find(Boolean) ?? null;
+
+    const valid = this.entryValidator.validate({
+      htfBias: direction,
+      m15Momentum: momentum.direction,
+      hasDisplacement: !!displacement,
+      hasFVG: !!fvg,
+    });
+
+    if (!valid) {
+      logger.debug(
+        { direction, hasFVG: !!fvg, hasDisplacement: !!displacement },
+        'Breakout pullback rejected — conditions not met',
+      );
+      return null;
+    }
+
+    // ── 5. Niveles de precio ──────────────────────────────────────────────────
+    const entryPrice = m5[m5.length - 1].close;
+    const stopLoss = direction === 'BULLISH'
+      ? pullbackZone.level - configService.zoneSlBufferPoints
+      : pullbackZone.level + configService.zoneSlBufferPoints;
+
+    const slDistance = Math.abs(entryPrice - stopLoss);
+    if (configService.minSlPoints > 0 && slDistance < configService.minSlPoints) return null;
+
+    const takeProfit = direction === 'BULLISH'
+      ? entryPrice + slDistance * 2
+      : entryPrice - slDistance * 2;
+
+    logger.debug(
+      { direction, level: pullbackZone.level, tf: pullbackZone.timeframe },
+      'Breakout pullback signal detected',
+    );
+
+    return {
+      direction,
+      entryPrice,
+      stopLoss,
+      takeProfit,
+      activeZone: {
+        level: pullbackZone.level,
+        type: pullbackZone.type,
+        timeframe: pullbackZone.timeframe,
+        strength: pullbackZone.strength,
+        candleTime: pullbackZone.breakoutTime,
+      },
+      momentum,
+    };
+  }
+
+  private evaluateEMAPullbackSignal(symbol: string): ZoneTradeSignal | null {
+    const h1 = this.marketData.getCandles(symbol, 'H1');
+    const m15 = this.marketData.getCandles(symbol, 'M15');
+    const m5 = this.marketData.getCandles(symbol, 'M5');
+
+    if (h1.length < 40 || m15.length < 40 || m5.length < 1) return null;
+
+    const h1Ema8 = this.emaEngine.last(h1, 8);
+    const h1Ema34 = this.emaEngine.last(h1, 34);
+    if (h1Ema8 === null || h1Ema34 === null) return null;
+
+    const direction: 'BULLISH' | 'BEARISH' = h1Ema8 > h1Ema34 ? 'BULLISH' : 'BEARISH';
+
+    if (configService.emaSpreadMin > 0 && Math.abs(h1Ema8 - h1Ema34) < configService.emaSpreadMin) return null;
+
+    const m15Ema34 = this.emaEngine.last(m15, 34);
+    if (m15Ema34 === null) return null;
+
+    if (configService.epM15Align) {
+      const m15Ema8 = this.emaEngine.last(m15, 8);
+      if (m15Ema8 === null) return null;
+      if (direction === 'BULLISH' && m15Ema8 < m15Ema34) return null;
+      if (direction === 'BEARISH' && m15Ema8 > m15Ema34) return null;
+    }
+
+    const currentPrice = m5[m5.length - 1].close;
+    if (Math.abs(currentPrice - m15Ema34) > configService.zoneProximityPoints) return null;
+
+    const macd = this.macdEngine.analyze(m15);
+    if (!macd) return null;
+    if (direction === 'BULLISH' && macd.histogram <= 0) return null;
+    if (direction === 'BEARISH' && macd.histogram >= 0) return null;
+
+    const entryPrice = currentPrice;
+    const stopLoss = direction === 'BULLISH'
+      ? m15Ema34 - configService.zoneSlBufferPoints
+      : m15Ema34 + configService.zoneSlBufferPoints;
+
+    const slDist = Math.abs(entryPrice - stopLoss);
+    if (configService.minSlPoints > 0 && slDist < configService.minSlPoints) return null;
+
+    const takeProfit = direction === 'BULLISH'
+      ? entryPrice + slDist * 2
+      : entryPrice - slDist * 2;
+
+    const syntheticZone: SRZone = {
+      level: m15Ema34,
+      type: direction === 'BULLISH' ? 'SUPPORT' : 'RESISTANCE',
+      timeframe: 'M15',
+      strength: 1,
+      candleTime: m15[m15.length - 1].time,
+    };
+
+    return {
+      signalType: 'EMA_PB',
+      direction,
+      entryPrice,
+      stopLoss,
+      takeProfit,
+      activeZone: syntheticZone,
+      momentum: { direction, strength: 'NONE', timestamp: m5[m5.length - 1].time },
+    };
+  }
+
+  private async onZoneSignal(signal: ZoneTradeSignal): Promise<void> {
+    const { direction, entryPrice, stopLoss, takeProfit, activeZone, momentum } = signal;
+    const symbol = configService.symbol;
+    const tag = signal.signalType === 'EMA_PB' ? '[EP]' : '[ZB]';
+
+    logger.info(
+      { direction, zone: activeZone.level, zoneTF: activeZone.timeframe, m15Momentum: momentum.strength, tag },
+      'Signal detected',
+    );
 
     // ── 0. Filtro de noticias ─────────────────────────────────────────────────
     if (this.newsFilter.isBlocked()) {
       const next = this.newsFilter.nextBlockedEvent();
       logger.info(
         { event: next?.title, time: next?.date.toISOString() },
-        'Signal skipped — news blackout window (±1 min USD high-impact event)',
+        'Signal skipped — news blackout window',
       );
       return;
     }
 
-    // ── 0b. Filtro de sesión (horarios bloqueados) ────────────────────────────
+    // ── 0b. Filtro de sesión ──────────────────────────────────────────────────
     const sessionCheck = this.sessionGuard.isBlocked(configService.blockedHours);
     if (sessionCheck.blocked) {
       logger.info({ window: sessionCheck.label }, 'Signal skipped — blocked trading hours');
-      return;
-    }
-
-    const symbol = configService.symbol;
-    const d1Candles = this.marketData.getCandles(symbol, 'D1');
-    const m5Candles = this.marketData.getCandles(symbol, 'M5');
-
-    if (d1Candles.length < 10 || m5Candles.length < 3) {
-      logger.warn('Not enough candles to evaluate signal');
       return;
     }
 
@@ -419,122 +670,16 @@ export class Application {
 
     // ── 2. Cooldown ───────────────────────────────────────────────────────────
     const cooldownMs = configService.signalCooldownMinutes * 60_000;
-    const lastSignal = this.lastSignalTime.get(mss.direction) ?? 0;
+    const lastSignal = this.lastSignalTime.get(direction) ?? 0;
     const elapsed = Date.now() - lastSignal;
 
     if (elapsed < cooldownMs) {
       const remaining = Math.ceil((cooldownMs - elapsed) / 60_000);
-      logger.debug({ direction: mss.direction, remaining }, 'Signal skipped — cooldown active');
+      logger.debug({ direction, remaining }, 'Signal skipped — cooldown active');
       return;
     }
 
-    // ── 3. Sesgo HTF (D1) ────────────────────────────────────────────────────
-    const htfBias = this.biasEngine.analyze(d1Candles);
-
-    if (htfBias === 'RANGE') {
-      logger.debug('Signal skipped — D1 bias is RANGE');
-      return;
-    }
-
-    // ── 3b. Confirmación M15 (opcional) ─────────────────────────────────────
-    if (configService.m15ConfirmationEnabled) {
-      const m15Candles = this.marketData.getCandles(symbol, 'M15');
-      const m15Bias = this.biasEngine.analyze(m15Candles);
-      if (m15Bias !== htfBias) {
-        logger.debug({ htfBias, m15Bias }, 'Signal skipped — M15 bias not aligned with D1');
-        return;
-      }
-    }
-
-    const mssDirection = mss.direction;
-    const sweepDirection = sweep.direction === 'bullish' ? 'BULLISH' : 'BEARISH';
-
-    // ── 4. FVG y desplazamiento en M5 ────────────────────────────────────────
-    const lastM5 = m5Candles[m5Candles.length - 1];
-
-    // Search FVG in the last 7 candles — the FVG forms during the displacement candle
-    // (2–5 candles before MSS confirmation), not at the MSS candle itself.
-    const fvgWindow = m5Candles.slice(-7);
-    let fvg = null;
-    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
-      const slice = fvgWindow.slice(k - 2, k + 1);
-      fvg = mssDirection === 'BULLISH'
-        ? this.fvgDetector.detectBullish(slice)
-        : this.fvgDetector.detectBearish(slice);
-    }
-
-    // Filtro de tamaño de FVG
-    if (fvg && configService.minFvgPoints > 0 && fvg.size < configService.minFvgPoints) {
-      logger.debug(
-        { fvgSize: fvg.size.toFixed(2), min: configService.minFvgPoints },
-        'Signal skipped — FVG too small',
-      );
-      return;
-    }
-
-    // Check displacement in the last 5 candles — the strong impulse precedes the MSS.
-    const dispWindow = m5Candles.slice(-5);
-    const displacement = dispWindow.map(c => this.displacementDetector.detect(c)).find(Boolean) ?? null;
-
-    // ── 5. Validación de condiciones de entrada ───────────────────────────────
-    const valid = this.entryValidator.validate({
-      htfBias,
-      sweepDirection,
-      mssDirection,
-      hasDisplacement: !!displacement,
-      hasFVG: !!fvg,
-    });
-
-    if (!valid) {
-      logger.debug(
-        { htfBias, sweepDirection, mssDirection, hasFVG: !!fvg, hasDisplacement: !!displacement },
-        'Signal rejected — conditions not met',
-      );
-      return;
-    }
-
-    // ── 5b. Confirmación M1 (opcional) ──────────────────────────────────────
-    let m1ConfirmCandle: { close: number; low: number; high: number } | null = null;
-
-    if (configService.m1ConfirmationEnabled) {
-      const m1Candles = this.marketData.getCandles(symbol, 'M1');
-      const m1Window = m1Candles.slice(-5);
-      const m1Disp = m1Window.find(c => {
-        const d = this.displacementDetector.detect(c);
-        return d?.direction === mssDirection;
-      });
-      if (!m1Disp) {
-        logger.debug({ mssDirection }, 'Signal skipped — no M1 displacement confirmation');
-        return;
-      }
-      m1ConfirmCandle = m1Disp;
-    }
-
-    // ── 6. Niveles de precio ──────────────────────────────────────────────────
-    // SL always based on M5 sweep candle — wide enough to survive intraday noise
-    const sweepRange = sweep.sweepCandleHigh - sweep.sweepCandleLow;
-    const buffer = sweepRange * SL_BUFFER_RATIO;
-    const stopLoss = mssDirection === 'BULLISH'
-      ? sweep.sweepCandleLow - buffer
-      : sweep.sweepCandleHigh + buffer;
-
-    // Entry: M1 displacement close if confirmed, otherwise M5 candle close
-    const entryPrice = m1ConfirmCandle ? m1ConfirmCandle.close : lastM5.close;
-
-    // TP: mínimo 2:1 R:R
-    const slDistance = Math.abs(entryPrice - stopLoss);
-
-    if (configService.minSlPoints > 0 && slDistance < configService.minSlPoints) {
-      logger.debug({ slDistance: slDistance.toFixed(2), min: configService.minSlPoints }, 'Signal skipped — SL distance too small');
-      return;
-    }
-
-    const takeProfit =
-      mssDirection === 'BULLISH'
-        ? entryPrice + slDistance * 2
-        : entryPrice - slDistance * 2;
-
-    // ── 7. Balance, drawdown y sizing ────────────────────────────────────────
+    // ── 3. Balance, drawdown y sizing ────────────────────────────────────────
     const accountResponse = await this.mt5.getAccount();
 
     if (!accountResponse.success || !accountResponse.data) {
@@ -547,10 +692,7 @@ export class Application {
 
     if (this.drawdownGuard.isBreached(balance, configService.maxDailyDrawdownPercent)) {
       logger.warn(
-        {
-          drawdownPct: this.drawdownGuard.drawdownPct(balance).toFixed(2),
-          limit: configService.maxDailyDrawdownPercent,
-        },
+        { drawdownPct: this.drawdownGuard.drawdownPct(balance).toFixed(2), limit: configService.maxDailyDrawdownPercent },
         'Signal skipped — daily drawdown limit reached',
       );
       return;
@@ -558,10 +700,7 @@ export class Application {
 
     if (this.profitTargetGuard.isReached(balance, configService.maxDailyProfitPercent)) {
       logger.info(
-        {
-          profitPct: this.profitTargetGuard.profitPct(balance).toFixed(2),
-          target: configService.maxDailyProfitPercent,
-        },
+        { profitPct: this.profitTargetGuard.profitPct(balance).toFixed(2), target: configService.maxDailyProfitPercent },
         'Signal skipped — daily profit target reached',
       );
       return;
@@ -569,10 +708,7 @@ export class Application {
 
     if (this.weeklyDrawdownGuard.isBreached(balance, configService.maxWeeklyDrawdownPercent)) {
       logger.warn(
-        {
-          drawdownPct: this.weeklyDrawdownGuard.drawdownPct(balance).toFixed(2),
-          limit: configService.maxWeeklyDrawdownPercent,
-        },
+        { drawdownPct: this.weeklyDrawdownGuard.drawdownPct(balance).toFixed(2), limit: configService.maxWeeklyDrawdownPercent },
         'Signal skipped — weekly drawdown limit reached',
       );
       return;
@@ -582,6 +718,15 @@ export class Application {
       logger.info(
         { count: this.dailyTradeCountGuard.tradeCount(), max: configService.maxDailyTrades },
         'Signal skipped — daily trade limit reached',
+      );
+      return;
+    }
+
+    const todayET = new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
+    if (this.consecLossGuard.isBlocked(configService.maxConsecLosses, todayET)) {
+      logger.warn(
+        { streak: this.consecLossGuard.currentStreak, max: configService.maxConsecLosses },
+        'Signal skipped — consecutive loss circuit breaker active',
       );
       return;
     }
@@ -604,17 +749,17 @@ export class Application {
       Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 10) / 10),
     );
 
-    // ── 8. Ejecución ──────────────────────────────────────────────────────────
+    // ── 4. Ejecución ──────────────────────────────────────────────────────────
     const order = {
       symbol,
-      side: mssDirection === 'BULLISH' ? ('BUY' as const) : ('SELL' as const),
+      side: direction === 'BULLISH' ? ('BUY' as const) : ('SELL' as const),
       volume,
       entryPrice,
       stopLoss,
       takeProfit,
     };
 
-    this.lastSignalTime.set(mssDirection, Date.now());
+    this.lastSignalTime.set(direction, Date.now());
 
     const notifParams = {
       side: order.side,
@@ -650,7 +795,7 @@ export class Application {
         this.approvalPending = false;
       }
       if (!approved) {
-        logger.info({ direction: mss.direction }, 'Semi-auto trade rejected or timed out');
+        logger.info({ direction }, 'Semi-auto trade rejected or timed out');
         return;
       }
     }

@@ -1,18 +1,20 @@
 import axios from 'axios';
 
-import { StrategyEngine } from '@bot-core/core/strategy-engine';
 import { BiasEngine } from '@bot-core/strategy/bias/bias-engine';
-import { detectEqualHighs, detectEqualLows } from '@bot-core/strategy/liquidity/equal-levels';
+import { ZoneEngine } from '@bot-core/strategy/zones/zone-engine';
+import { MomentumEngine } from '@bot-core/strategy/momentum/momentum-engine';
+import { BreakoutEngine } from '@bot-core/strategy/breakout/breakout-engine';
 import { FVGDetector } from '@bot-core/strategy/fvg/fvg-detector';
 import { DisplacementDetector } from '@bot-core/strategy/fvg/displacement-detector';
+import { EngulfingDetector } from '@bot-core/strategy/fvg/engulfing-detector';
 import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
+import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
+import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
 
-import type { LiquiditySweep } from '@bot-core/strategy/liquidity/liquidity.types';
-import type { MSS } from '@bot-core/strategy/mss/mss-types';
 import type { Candle } from '@bot-core/services/mt5/mt5.types';
 
-import type { BacktestTrade, BacktestReport, BacktestMetrics, TradeResult } from './backtest.types';
+import type { BacktestTrade, BacktestReport, BacktestMetrics, TradeResult, SignalType } from './backtest.types';
 
 const BRIDGE_URL = 'http://127.0.0.1:8000/api/trading';
 const WARM_UP_DAYS = 5;
@@ -20,7 +22,6 @@ const WARM_UP_CANDLES = 100;
 const MAX_LOOKAHEAD = 500;
 const MAX_VOLUME = 20.0;
 const MIN_VOLUME = 0.1;
-const SL_BUFFER_RATIO = 0.1;
 
 export interface BlockedWindow {
   from: string;
@@ -38,8 +39,17 @@ export interface BacktestParams {
   blockedHours: BlockedWindow[];
   minFvgPoints: number;
   minSlPoints: number;
-  m15ConfirmationEnabled: boolean;
-  m1ConfirmationEnabled: boolean;
+  zoneProximityPoints: number;
+  zoneSlBufferPoints: number;
+  emaSpreadMin: number;
+  epUseM15Align: boolean;
+  epUseMacdSlope: boolean;
+  maxDailyDrawdownPct: number;
+  maxWeeklyDrawdownPct: number;
+  maxConsecLosses: number;
+  beAtPoints: number;   // 0=off, -1=1R mode, >0=fixed points
+  beBuffer: number;
+  partialTpEnabled: boolean;
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -99,30 +109,68 @@ function simulateOutcome(
   side: 'BUY' | 'SELL',
   futureCandles: Candle[],
   riskAmount: number,
+  beAtPoints = 0,   // 0 = disabled, -1 = use 1R (slDist) as trigger
+  beBuffer = 0,
+  partialTp = false,
 ): SimulatedOutcome {
-  const slDist = Math.abs(entry - sl);
+  const origSlDist = Math.abs(entry - sl);
   const tpDist = Math.abs(tp - entry);
-  const winPnl = riskAmount * (tpDist / slDist);
+  const winPnl = riskAmount * (tpDist / origSlDist);
+
+  // -1 sentinel → trigger BE at 1R (price moves same distance as the SL)
+  const effectiveBeTrigger = beAtPoints === -1 ? origSlDist : beAtPoints;
+
+  let currentSL = sl;
+  let beTriggered = false;
+  let partialDone = false;
+  let lockedPnl = 0;          // profit banked from the 50% partial close
+  let remainingRisk = riskAmount; // risk on the open portion after partial
 
   for (const c of futureCandles) {
+    // Check if BE trigger fires within this candle
+    if (effectiveBeTrigger > 0 && !beTriggered) {
+      const favorMove = side === 'BUY' ? c.high - entry : entry - c.low;
+      if (favorMove >= effectiveBeTrigger) {
+        beTriggered = true;
+        currentSL = side === 'BUY' ? entry + beBuffer : entry - beBuffer;
+
+        // Partial TP: bank 50% at the trigger price, continue with half the risk
+        if (partialTp && !partialDone) {
+          partialDone = true;
+          lockedPnl = 0.5 * riskAmount * (effectiveBeTrigger / origSlDist);
+          remainingRisk = 0.5 * riskAmount;
+        }
+      }
+    }
+
+    const stopPnl = beTriggered
+      ? lockedPnl + remainingRisk * (beBuffer / origSlDist)
+      : -riskAmount;
+    const stopRr = beTriggered
+      ? (lockedPnl + remainingRisk * (beBuffer / origSlDist)) / riskAmount
+      : -1;
+
+    const fullWinPnl  = lockedPnl + remainingRisk * (tpDist / origSlDist);
+    const fullWinRr   = fullWinPnl / riskAmount;
+
     if (side === 'BUY') {
-      const hitSL = c.low <= sl;
+      const hitSL = c.low <= currentSL;
       const hitTP = c.high >= tp;
       if (hitSL && hitTP) {
-        if (c.open >= tp) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: winPnl, actualRr: tpDist / slDist };
-        return { result: 'LOSS', closePrice: sl, closeTime: c.time, pnl: -riskAmount, actualRr: -1 };
+        if (c.open >= tp) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: fullWinPnl, actualRr: fullWinRr };
+        return { result: beTriggered ? 'WIN' : 'LOSS', closePrice: currentSL, closeTime: c.time, pnl: stopPnl, actualRr: stopRr };
       }
-      if (hitSL) return { result: 'LOSS', closePrice: sl, closeTime: c.time, pnl: -riskAmount, actualRr: -1 };
-      if (hitTP) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: winPnl, actualRr: tpDist / slDist };
+      if (hitSL) return { result: beTriggered ? 'WIN' : 'LOSS', closePrice: currentSL, closeTime: c.time, pnl: stopPnl, actualRr: stopRr };
+      if (hitTP) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: fullWinPnl, actualRr: fullWinRr };
     } else {
-      const hitSL = c.high >= sl;
+      const hitSL = c.high >= currentSL;
       const hitTP = c.low <= tp;
       if (hitSL && hitTP) {
-        if (c.open <= tp) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: winPnl, actualRr: tpDist / slDist };
-        return { result: 'LOSS', closePrice: sl, closeTime: c.time, pnl: -riskAmount, actualRr: -1 };
+        if (c.open <= tp) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: fullWinPnl, actualRr: fullWinRr };
+        return { result: beTriggered ? 'WIN' : 'LOSS', closePrice: currentSL, closeTime: c.time, pnl: stopPnl, actualRr: stopRr };
       }
-      if (hitSL) return { result: 'LOSS', closePrice: sl, closeTime: c.time, pnl: -riskAmount, actualRr: -1 };
-      if (hitTP) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: winPnl, actualRr: tpDist / slDist };
+      if (hitSL) return { result: beTriggered ? 'WIN' : 'LOSS', closePrice: currentSL, closeTime: c.time, pnl: stopPnl, actualRr: stopRr };
+      if (hitTP) return { result: 'WIN', closePrice: tp, closeTime: c.time, pnl: fullWinPnl, actualRr: fullWinRr };
     }
   }
   return { result: 'OPEN', closePrice: null, closeTime: null, pnl: 0, actualRr: null };
@@ -185,60 +233,246 @@ function computeMetrics(trades: BacktestTrade[], initialBalance: number): Backte
 export async function runBacktest(params: BacktestParams): Promise<BacktestReport> {
   const {
     symbol, from, to, initialBalance, riskPercent, cooldownMinutes,
-    blockedHours, minFvgPoints, minSlPoints, m15ConfirmationEnabled, m1ConfirmationEnabled,
+    blockedHours, minFvgPoints, minSlPoints, zoneProximityPoints, zoneSlBufferPoints,
+    emaSpreadMin, epUseM15Align, epUseMacdSlope,
+    maxDailyDrawdownPct, maxWeeklyDrawdownPct, maxConsecLosses,
+    beAtPoints, beBuffer, partialTpEnabled,
   } = params;
 
-  // Fetch starts WARM_UP_DAYS before `from` so the engine has context on day 1
   const fetchFrom = new Date(from + 'T00:00:00');
   fetchFrom.setDate(fetchFrom.getDate() - WARM_UP_DAYS);
   const fetchFromStr = fetchFrom.toISOString().slice(0, 10);
 
-  // Fetch ends the day AFTER `to` to include the full last day
   const fetchTo = new Date(to + 'T00:00:00');
   fetchTo.setDate(fetchTo.getDate() + 1);
   const fetchToStr = fetchTo.toISOString().slice(0, 10);
 
   const fromTimestamp = new Date(from + 'T00:00:00').getTime() / 1000;
 
-  // D1 bias needs ~1 year of history — fetch independently from M5/H1 warm-up window
+  // D1 bias needs ~1 year of history
   const d1FetchFrom = new Date(from + 'T00:00:00');
   d1FetchFrom.setDate(d1FetchFrom.getDate() - 365);
   const d1FetchFromStr = d1FetchFrom.toISOString().slice(0, 10);
 
   console.log(`\nFetching candles for ${symbol}  (${fetchFromStr} → ${fetchToStr})...`);
 
-  const [m5Candles, h1Candles, m15Candles, d1Candles, m1Candles] = await Promise.all([
+  const [m5Candles, h1Candles, h4Candles, m15Candles, d1Candles] = await Promise.all([
     fetchCandles(symbol, 'M5', fetchFromStr, fetchToStr),
     fetchCandles(symbol, 'H1', fetchFromStr, fetchToStr),
-    m15ConfirmationEnabled
-      ? fetchCandles(symbol, 'M15', fetchFromStr, fetchToStr)
-      : Promise.resolve([] as Candle[]),
+    fetchCandles(symbol, 'H4', fetchFromStr, fetchToStr),
+    fetchCandles(symbol, 'M15', fetchFromStr, fetchToStr),
     fetchCandles(symbol, 'D1', d1FetchFromStr, fetchToStr),
-    m1ConfirmationEnabled
-      ? fetchCandles(symbol, 'M1', fetchFromStr, fetchToStr)
-      : Promise.resolve([] as Candle[]),
   ]);
 
   console.log(`  M5:  ${m5Candles.length} candles`);
+  console.log(`  M15: ${m15Candles.length} candles`);
   console.log(`  H1:  ${h1Candles.length} candles`);
-  if (m15ConfirmationEnabled) console.log(`  M15: ${m15Candles.length} candles`);
+  console.log(`  H4:  ${h4Candles.length} candles`);
   console.log(`  D1:  ${d1Candles.length} candles`);
-  if (m1ConfirmationEnabled) console.log(`  M1:  ${m1Candles.length} candles`);
 
-  // ── Strategy engine ─────────────────────────────────────────────────────────
-  const strategy = new StrategyEngine();
+  // ── Strategy engines ────────────────────────────────────────────────────────
   const biasEngine = new BiasEngine();
+  const zoneEngine = new ZoneEngine();
+  const momentumEngine = new MomentumEngine();
+  const breakoutEngine = new BreakoutEngine();
   const fvgDetector = new FVGDetector();
+  const engulfingDetector = new EngulfingDetector();
   const displacementDetector = new DisplacementDetector();
   const entryValidator = new EntryValidator();
   const positionSizing = new PositionSizing();
+  const emaEngine = new EMAEngine();
+  const macdEngine = new MACDEngine();
 
-  strategy.initialize();
+  // ── Signal evaluators ────────────────────────────────────────────────────────
 
-  const pendingSignals: Array<{ sweep: LiquiditySweep; mss: MSS }> = [];
-  strategy.on('mssConfirmed', (data: { sweep: LiquiditySweep; mss: MSS }) => {
-    pendingSignals.push(data);
-  });
+  interface SignalCandidate {
+    signalType: SignalType;
+    direction: 'BULLISH' | 'BEARISH';
+    entryPrice: number;
+    stopLoss: number;
+    takeProfit: number;
+  }
+
+  function evalM5Entry(
+    direction: 'BULLISH' | 'BEARISH',
+    zoneLevel: number,
+    m5Slice: Candle[],
+    i: number,
+    signalType: SignalType,
+  ): SignalCandidate | null {
+    const fvgWindow = m5Slice.slice(Math.max(0, i - 6), i + 1);
+    let fvg = null;
+    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
+      const slice = fvgWindow.slice(k - 2, k + 1);
+      fvg = direction === 'BULLISH' ? fvgDetector.detectBullish(slice) : fvgDetector.detectBearish(slice);
+    }
+    if (fvg && minFvgPoints > 0 && fvg.size < minFvgPoints) return null;
+
+    const dispWindow = m5Slice.slice(Math.max(0, i - 4), i + 1);
+    const displacement = dispWindow.map(c => displacementDetector.detect(c)).find(Boolean) ?? null;
+
+    const momentum = momentumEngine.analyze(m5Slice.slice(0, i + 1)); // placeholder — caller passes M15
+    // Validation uses caller-supplied momentum; re-use same validator
+    const valid = entryValidator.validate({
+      htfBias: direction,
+      m15Momentum: direction, // caller already confirmed momentum alignment
+      hasDisplacement: !!displacement,
+      hasFVG: !!fvg,
+    });
+    if (!valid) return null;
+
+    const entryPrice = m5Slice[i]!.close;
+    const stopLoss = direction === 'BULLISH'
+      ? zoneLevel - zoneSlBufferPoints
+      : zoneLevel + zoneSlBufferPoints;
+    const slDist = Math.abs(entryPrice - stopLoss);
+    if (minSlPoints > 0 && slDist < minSlPoints) return null;
+
+    return {
+      signalType,
+      direction,
+      entryPrice,
+      stopLoss,
+      takeProfit: direction === 'BULLISH' ? entryPrice + slDist * 2 : entryPrice - slDist * 2,
+    };
+  }
+
+  // BP entry: engulfing candle on M5 in the direction of the trade (no FVG required).
+  function evalBPEntry(
+    direction: 'BULLISH' | 'BEARISH',
+    zoneLevel: number,
+    m5Slice: Candle[],
+    i: number,
+  ): SignalCandidate | null {
+    if (i < 1) return null;
+
+    const engulfing = engulfingDetector.findRecent(m5Slice.slice(0, i + 1), direction, 4);
+    if (!engulfing) return null;
+
+    const entryPrice = m5Slice[i]!.close;
+    const stopLoss = direction === 'BULLISH'
+      ? zoneLevel - zoneSlBufferPoints
+      : zoneLevel + zoneSlBufferPoints;
+    const slDist = Math.abs(entryPrice - stopLoss);
+    if (minSlPoints > 0 && slDist < minSlPoints) return null;
+
+    return {
+      signalType: 'BREAKOUT',
+      direction,
+      entryPrice,
+      stopLoss,
+      takeProfit: direction === 'BULLISH' ? entryPrice + slDist * 2 : entryPrice - slDist * 2,
+    };
+  }
+
+  function evalZoneBounce(
+    d1: Candle[], h4: Candle[], h1: Candle[], m15: Candle[],
+    m5All: Candle[], i: number,
+  ): SignalCandidate | null {
+    if (d1.length < 10 || h4.length < 10 || h1.length < 10 || m15.length < 10) return null;
+    const currentPrice = m5All[i]!.close;
+
+    const zones = zoneEngine.getZones(d1, h4, h1, m15);
+    const activeZone = zoneEngine.findActiveZone(zones, currentPrice, zoneProximityPoints);
+    if (!activeZone) return null;
+
+    const htfBias = biasEngine.analyzeMultiTF(d1, h4, h1);
+    if (htfBias === 'RANGE') return null;
+
+    const zoneAligned =
+      (htfBias === 'BULLISH' && activeZone.type === 'SUPPORT') ||
+      (htfBias === 'BEARISH' && activeZone.type === 'RESISTANCE');
+    if (!zoneAligned) return null;
+
+    const momentum = momentumEngine.analyze(m15);
+    if (momentum.direction === 'NEUTRAL' || momentum.direction !== htfBias) return null;
+
+    return evalM5Entry(htfBias, activeZone.level, m5All, i, 'ZONE');
+  }
+
+  function evalBreakoutPullback(
+    h4: Candle[], h1: Candle[], d1: Candle[], m15: Candle[],
+    m5All: Candle[], i: number,
+  ): SignalCandidate | null {
+    if (h4.length < 20 || h1.length < 20 || m15.length < 10) return null;
+    const currentPrice = m5All[i]!.close;
+
+    const flippedZones = breakoutEngine.getFlippedZones(h4, h1);
+    const pullbackZone = breakoutEngine.findPullbackZone(flippedZones, currentPrice, zoneProximityPoints);
+    if (!pullbackZone) return null;
+
+    const direction = pullbackZone.direction;
+    const htfBias = biasEngine.analyzeMultiTF(d1, h4, h1);
+    if (htfBias !== direction) return null;
+
+    const momentum = momentumEngine.analyze(m15);
+    if (momentum.direction !== direction) return null;
+
+    return evalBPEntry(direction, pullbackZone.level, m5All, i);
+  }
+
+  function evalEMAPullback(
+    h1: Candle[], m15: Candle[], m5All: Candle[], i: number,
+    useM15Align: boolean, useMacdSlope: boolean,
+  ): SignalCandidate | null {
+    if (h1.length < 40 || m15.length < 40) return null;
+
+    // Trend direction from H1 EMA 8 vs EMA 34
+    const h1Ema8 = emaEngine.last(h1, 8);
+    const h1Ema34 = emaEngine.last(h1, 34);
+    if (h1Ema8 === null || h1Ema34 === null) return null;
+    const direction: 'BULLISH' | 'BEARISH' = h1Ema8 > h1Ema34 ? 'BULLISH' : 'BEARISH';
+
+    // Reject choppy H1 — spread must be wide enough to confirm real trend
+    if (emaSpreadMin > 0 && Math.abs(h1Ema8 - h1Ema34) < emaSpreadMin) return null;
+
+    // M15 EMA 34 as dynamic support/resistance
+    const m15Ema34 = emaEngine.last(m15, 34);
+    if (m15Ema34 === null) return null;
+
+    // [F1] M15 EMA 8 must still be on the trend side of EMA 34 (shallow pullback)
+    if (useM15Align) {
+      const m15Ema8 = emaEngine.last(m15, 8);
+      if (m15Ema8 === null) return null;
+      if (direction === 'BULLISH' && m15Ema8 < m15Ema34) return null;
+      if (direction === 'BEARISH' && m15Ema8 > m15Ema34) return null;
+    }
+
+    // Price must be near M15 EMA 34 (pullback zone)
+    const currentPrice = m5All[i]!.close;
+    if (Math.abs(currentPrice - m15Ema34) > zoneProximityPoints) return null;
+
+    // MACD histogram on M15 must confirm trend direction
+    const macd = macdEngine.analyze(m15);
+    if (!macd) return null;
+    if (direction === 'BULLISH' && macd.histogram <= 0) return null;
+    if (direction === 'BEARISH' && macd.histogram >= 0) return null;
+
+    // [F2] MACD histogram must be accelerating (slope in trend direction)
+    if (useMacdSlope) {
+      const slope = macdEngine.histogramSlope(m15);
+      if (!slope) return null;
+      const [prev, cur] = slope;
+      if (direction === 'BULLISH' && cur <= prev) return null;
+      if (direction === 'BEARISH' && cur >= prev) return null;
+    }
+
+    // Entry at M5 close; SL beyond EMA 34 ± buffer
+    const entryPrice = currentPrice;
+    const stopLoss = direction === 'BULLISH'
+      ? m15Ema34 - zoneSlBufferPoints
+      : m15Ema34 + zoneSlBufferPoints;
+    const slDist = Math.abs(entryPrice - stopLoss);
+    if (minSlPoints > 0 && slDist < minSlPoints) return null;
+
+    return {
+      signalType: 'EMA_PB',
+      direction,
+      entryPrice,
+      stopLoss,
+      takeProfit: direction === 'BULLISH' ? entryPrice + slDist * 2 : entryPrice - slDist * 2,
+    };
+  }
 
   // ── Replay state ────────────────────────────────────────────────────────────
   const trades: BacktestTrade[] = [];
@@ -248,9 +482,28 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   let balance = initialBalance;
   let lastTradeCloseTime = 0;
   let h1Ptr = 0;
+  let h4Ptr = 0;
   let m15Ptr = 0;
   let d1Ptr = 0;
-  let m1Ptr = 0;
+
+  // ── Daily / weekly drawdown guard state ─────────────────────────────────────
+  const etDay  = (ts: number) => new Date(ts * 1000).toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
+  // Week key = date of the Monday of that week (ET)
+  const etWeek = (ts: number) => {
+    const d = new Date(ts * 1000);
+    const dayMs = 86400_000;
+    // JS getDay(): 0=Sun,1=Mon... shift so Mon=0
+    const dow = (d.getDay() + 6) % 7;
+    const monday = new Date(d.getTime() - dow * dayMs);
+    return monday.toLocaleDateString('sv-SE', { timeZone: 'America/New_York' });
+  };
+
+  let currentDayKey  = '';
+  let currentWeekKey = '';
+  let dayRefBalance  = initialBalance;
+  let weekRefBalance = initialBalance;
+  let consecLosses   = 0;
+  let circuitDay     = '';  // ET day when circuit breaker is active
 
   console.log(`\nReplaying ${m5Candles.length} M5 candles...`);
 
@@ -258,176 +511,109 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     const candle = m5Candles[i]!;
     const currentTime = candle.time;
 
-    // ── Advance D1 pointer (D1 candle closes after 86400 s) ────────────────────
-    while (d1Ptr < d1Candles.length && d1Candles[d1Ptr]!.time + 86400 <= currentTime) {
-      d1Ptr++;
-    }
-
-    // ── Refresh EQH/EQL levels every hour (when a new H1 candle closes) ───────
-    let h1Updated = false;
-    while (h1Ptr < h1Candles.length && h1Candles[h1Ptr]!.time + 3600 <= currentTime) {
-      h1Ptr++;
-      h1Updated = true;
-    }
-
-    if (h1Updated && i >= 20) {
-      const m5Window = m5Candles.slice(Math.max(0, i - 199), i + 1);
-      const levels = [
-        ...detectEqualHighs(m5Window),
-        ...detectEqualLows(m5Window),
-      ];
-      strategy.getLiquidityEngine().addLevels(levels);
-    }
-
-    // ── Advance M15 pointer ─────────────────────────────────────────────────
-    if (m15ConfirmationEnabled) {
-      while (m15Ptr < m15Candles.length && m15Candles[m15Ptr]!.time + 900 <= currentTime) {
-        m15Ptr++;
-      }
-    }
-
-    // ── Advance M1 pointer ──────────────────────────────────────────────────
-    if (m1ConfirmationEnabled) {
-      while (m1Ptr < m1Candles.length && m1Candles[m1Ptr]!.time + 60 <= currentTime) {
-        m1Ptr++;
-      }
-    }
-
-    // ── Feed candle to strategy ─────────────────────────────────────────────
-    pendingSignals.length = 0;
-    strategy.processCandle(candle);
+    // ── Advance HTF pointers ──────────────────────────────────────────────────
+    while (d1Ptr < d1Candles.length && d1Candles[d1Ptr]!.time + 86400 <= currentTime) d1Ptr++;
+    while (h4Ptr < h4Candles.length && h4Candles[h4Ptr]!.time + 14400 <= currentTime) h4Ptr++;
+    while (h1Ptr < h1Candles.length && h1Candles[h1Ptr]!.time + 3600 <= currentTime) h1Ptr++;
+    while (m15Ptr < m15Candles.length && m15Candles[m15Ptr]!.time + 900 <= currentTime) m15Ptr++;
 
     // ── Skip conditions ─────────────────────────────────────────────────────
     if (i < WARM_UP_CANDLES) continue;
     if (currentTime < fromTimestamp) continue;
-    if (pendingSignals.length === 0) continue;
     if (currentTime <= lastTradeCloseTime) continue;
+    if (isSessionBlocked(currentTime, blockedHours)) continue;
 
-    const h1Window = h1Candles.slice(0, h1Ptr);
-    if (h1Window.length < 5) continue;
-
-    // ── Evaluate each signal (take first valid one per candle) ──────────────
-    for (const signal of pendingSignals) {
-      const dir = signal.mss.direction;
-
-      if (isSessionBlocked(currentTime, blockedHours)) continue;
-
-      const elapsed = currentTime - (lastSignalTime.get(dir) ?? 0);
-      if (elapsed < cooldownSec) continue;
-
-      const htfBias = biasEngine.analyze(d1Candles.slice(0, d1Ptr));
-      if (htfBias === 'RANGE') continue;
-      if (htfBias !== dir) continue;
-
-      if (m15ConfirmationEnabled && m15Ptr >= 5) {
-        const m15Bias = biasEngine.analyze(m15Candles.slice(0, m15Ptr));
-        if (m15Bias !== htfBias) continue;
-      }
-
-      // Search FVG in the last 7 candles — the FVG forms during the displacement candle
-      // (2–5 candles before MSS confirmation), not at the MSS candle itself.
-      const fvgWindow = m5Candles.slice(Math.max(0, i - 6), i + 1);
-      let fvg = null;
-      for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
-        const slice = fvgWindow.slice(k - 2, k + 1);
-        fvg = dir === 'BULLISH' ? fvgDetector.detectBullish(slice) : fvgDetector.detectBearish(slice);
-      }
-
-      // Check displacement in the last 5 candles — the strong impulse candle precedes the MSS.
-      const dispWindow = m5Candles.slice(Math.max(0, i - 4), i + 1);
-      const displacement = dispWindow.map(c => displacementDetector.detect(c)).find(Boolean) ?? null;
-      const sweepDir = signal.sweep.direction === 'bullish' ? ('BULLISH' as const) : ('BEARISH' as const);
-
-      const valid = entryValidator.validate({
-        htfBias,
-        sweepDirection: sweepDir,
-        mssDirection: dir,
-        hasDisplacement: !!displacement,
-        hasFVG: !!fvg,
-      });
-      if (!valid) continue;
-      if (fvg && minFvgPoints > 0 && fvg.size < minFvgPoints) continue;
-
-      // ── Price levels ──────────────────────────────────────────────────────
-      let entryPrice: number;
-      let stopLoss: number;
-
-      // SL always based on M5 sweep candle — wide enough to survive intraday noise
-      const sweepRange = signal.sweep.sweepCandleHigh - signal.sweep.sweepCandleLow;
-      const sweepBuffer = sweepRange * SL_BUFFER_RATIO;
-      stopLoss = dir === 'BULLISH'
-        ? signal.sweep.sweepCandleLow - sweepBuffer
-        : signal.sweep.sweepCandleHigh + sweepBuffer;
-
-      if (m1ConfirmationEnabled) {
-        // M1 confirms momentum is already moving in signal direction after M5 signal fires.
-        // Entry uses M1 displacement candle close; SL stays at M5 sweep candle level.
-        const m5CloseTime = candle.time + 300;
-        let m1SearchPtr = m1Ptr;
-        while (m1SearchPtr < m1Candles.length && m1Candles[m1SearchPtr]!.time < m5CloseTime) {
-          m1SearchPtr++;
-        }
-        const m1Window = m1Candles.slice(m1SearchPtr, m1SearchPtr + 5);
-        const m1Disp = m1Window.find(c => {
-          const d = displacementDetector.detect(c);
-          return d?.direction === dir;
-        });
-        if (!m1Disp) continue;
-        entryPrice = m1Disp.close;
-      } else {
-        entryPrice = candle.close;
-      }
-
-      const slDist = Math.abs(entryPrice - stopLoss);
-      if (minSlPoints > 0 && slDist < minSlPoints) continue;
-
-      const takeProfit = dir === 'BULLISH'
-        ? entryPrice + slDist * 2
-        : entryPrice - slDist * 2;
-
-      const sizing = positionSizing.calculate({
-        accountBalance: balance,
-        riskPercent,
-        entryPrice,
-        stopLoss,
-        target: takeProfit,
-      });
-      if (sizing.riskRewardRatio < 2) continue;
-
-      const volume = Math.min(MAX_VOLUME, Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 10) / 10));
-      const side = dir === 'BULLISH' ? ('BUY' as const) : ('SELL' as const);
-
-      // ── Simulate outcome ──────────────────────────────────────────────────
-      const outcome = simulateOutcome(
-        entryPrice, stopLoss, takeProfit, side,
-        m5Candles.slice(i + 1, i + 1 + MAX_LOOKAHEAD),
-        sizing.riskAmount,
-      );
-
-      balance += outcome.pnl;
-      lastSignalTime.set(dir, currentTime);
-      if (outcome.closeTime !== null) lastTradeCloseTime = outcome.closeTime;
-
-      trades.push({
-        tradeNumber: trades.length + 1,
-        direction: dir,
-        side,
-        openTime: currentTime,
-        closeTime: outcome.closeTime,
-        openTimeISO: toETString(currentTime),
-        closeTimeISO: outcome.closeTime ? toETString(outcome.closeTime) : null,
-        entry: Math.round(entryPrice * 100) / 100,
-        sl: Math.round(stopLoss * 100) / 100,
-        tp: Math.round(takeProfit * 100) / 100,
-        plannedRr: Math.round(sizing.riskRewardRatio * 100) / 100,
-        actualRr: outcome.actualRr !== null ? Math.round(outcome.actualRr * 100) / 100 : null,
-        result: outcome.result,
-        pnl: Math.round(outcome.pnl * 100) / 100,
-      });
-
-      void volume;
-      break;
+    // ── Daily / weekly guard: reset reference at start of each new period ───
+    const dk = etDay(currentTime);
+    if (dk !== currentDayKey) {
+      currentDayKey = dk;
+      dayRefBalance = balance;
+      consecLosses = 0;   // reset per-day consecutive count
+      circuitDay = '';    // reset circuit breaker for new day
     }
+    const wk = etWeek(currentTime);
+    if (wk !== currentWeekKey) { currentWeekKey = wk; weekRefBalance = balance; }
+
+    if (maxDailyDrawdownPct > 0 && dayRefBalance > 0) {
+      const dd = (dayRefBalance - balance) / dayRefBalance * 100;
+      if (dd >= maxDailyDrawdownPct) continue;
+    }
+    if (maxWeeklyDrawdownPct > 0 && weekRefBalance > 0) {
+      const dd = (weekRefBalance - balance) / weekRefBalance * 100;
+      if (dd >= maxWeeklyDrawdownPct) continue;
+    }
+    if (maxConsecLosses > 0 && circuitDay === dk) continue;
+
+    const d1Window = d1Candles.slice(0, d1Ptr);
+    const h4Window = h4Candles.slice(0, h4Ptr);
+    const h1Window = h1Candles.slice(0, h1Ptr);
+    const m15Window = m15Candles.slice(0, m15Ptr);
+
+    // ── Evaluar señal: ZB primero, EMA Pullback como fallback ────────────────
+    const signal = evalZoneBounce(d1Window, h4Window, h1Window, m15Window, m5Candles, i)
+      ?? evalEMAPullback(h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope);
+
+    if (!signal) continue;
+
+    // ── Cooldown ─────────────────────────────────────────────────────────────
+    const elapsed = currentTime - (lastSignalTime.get(signal.direction) ?? 0);
+    if (elapsed < cooldownSec) continue;
+
+    // ── Sizing ───────────────────────────────────────────────────────────────
+    const { direction, entryPrice, stopLoss, takeProfit } = signal;
+    const sizing = positionSizing.calculate({
+      accountBalance: balance,
+      riskPercent,
+      entryPrice,
+      stopLoss,
+      target: takeProfit,
+    });
+    if (sizing.riskRewardRatio < 2) continue;
+
+    const volume = Math.min(MAX_VOLUME, Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 10) / 10));
+    const side = direction === 'BULLISH' ? ('BUY' as const) : ('SELL' as const);
+
+    // ── Simulate outcome ─────────────────────────────────────────────────────
+    const outcome = simulateOutcome(
+      entryPrice, stopLoss, takeProfit, side,
+      m5Candles.slice(i + 1, i + 1 + MAX_LOOKAHEAD),
+      sizing.riskAmount,
+      beAtPoints,
+      beBuffer,
+      partialTpEnabled,
+    );
+
+    balance += outcome.pnl;
+    lastSignalTime.set(direction, currentTime);
+    if (outcome.closeTime !== null) lastTradeCloseTime = outcome.closeTime;
+
+    // Update consecutive loss circuit breaker
+    if (outcome.result === 'LOSS') {
+      consecLosses++;
+      if (maxConsecLosses > 0 && consecLosses >= maxConsecLosses) circuitDay = dk;
+    } else if (outcome.result === 'WIN') {
+      consecLosses = 0;
+    }
+
+    trades.push({
+      tradeNumber: trades.length + 1,
+      signalType: signal.signalType,
+      direction,
+      side,
+      openTime: currentTime,
+      closeTime: outcome.closeTime,
+      openTimeISO: toETString(currentTime),
+      closeTimeISO: outcome.closeTime ? toETString(outcome.closeTime) : null,
+      entry: Math.round(entryPrice * 100) / 100,
+      sl: Math.round(stopLoss * 100) / 100,
+      tp: Math.round(takeProfit * 100) / 100,
+      plannedRr: Math.round(sizing.riskRewardRatio * 100) / 100,
+      actualRr: outcome.actualRr !== null ? Math.round(outcome.actualRr * 100) / 100 : null,
+      result: outcome.result,
+      pnl: Math.round(outcome.pnl * 100) / 100,
+    });
+
+    void volume;
   }
 
   const metrics = computeMetrics(trades, initialBalance);

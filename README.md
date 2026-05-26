@@ -19,12 +19,15 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 ┌──────────────────────▼──────────────────────────────────┐
 │                  bot-core  (TypeScript)                  │
 │                                                          │
-│  MarketDataService → StrategyEngine                      │
-│    ├─ LiquidityEngine  (niveles BSL/SSL + sweeps)        │
-│    ├─ BiasEngine       (sesgo HTF en H1)                 │
-│    ├─ FVGEngine        (Fair Value Gaps en M5)           │
-│    ├─ MSSDetector      (Market Structure Shift)          │
-│    ├─ EntryValidator   (5 condiciones ICT)               │
+│  MarketDataService  (D1 / H4 / H1 / M15 / M5)          │
+│    ├─ ZoneEngine       (zonas S/R desde D1 + H4 + H1 + M15)   │
+│    ├─ BiasEngine       (sesgo multi-TF D1+H4+H1)        │
+│    ├─ MomentumEngine   (impulso intradía en M15)         │
+│    ├─ FVGDetector      (Fair Value Gaps en M5)           │
+│    ├─ DisplacementDetector  (velas impulso en M5)        │
+│    ├─ EntryValidator   (momentum + FVG + desplazamiento) │
+│    ├─ EMAEngine        (EMA 8/34 en H1 y M15)           │
+│    ├─ MACDEngine       (MACD histograma en M15)          │
 │    ├─ PositionSizing   (riesgo % del balance)            │
 │    └─ PositionMonitor  (break-even + partial TP + trailing)│
 │                                                          │
@@ -34,7 +37,8 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 │    ├─ DailyDrawdownGuard     (límite % pérdida diaria)   │
 │    ├─ DailyProfitTargetGuard (objetivo % ganancia diaria)│
 │    ├─ WeeklyDrawdownGuard    (límite % pérdida semanal)  │
-│    └─ DailyTradeCountGuard   (máximo trades por día)     │
+│    ├─ DailyTradeCountGuard   (máximo trades por día)     │
+│    └─ ConsecLossGuard        (circuit breaker racha de pérdidas)│
 │                                                          │
 │  TradeJournalService  (registro de operaciones en DB)    │
 │  BotStatusService     (semáforo en tiempo real)          │
@@ -47,22 +51,27 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 
 ## Lógica de entrada
 
-El bot requiere **5 condiciones simultáneas** antes de abrir una posición:
+El bot evalúa dos tipos de señal en cada ciclo. La señal **Zone Bounce (ZB)** tiene prioridad; si no se cumple, intenta la señal **EMA Pullback (EP)** como fallback. Solo se ejecuta una señal por ciclo.
 
-1. **Sesgo D1 alineado** — BiasEngine detecta BOS/CHOCH en velas diarias (D1)
-2. **Sweep de liquidez** — precio toma stops por encima/debajo de un nivel EQH/EQL en M5 (patrón de 1 o 2 velas)
-3. **Market Structure Shift (MSS)** — rotura del último swing high/low real detectado por SwingDetector
-4. **Desplazamiento** — vela M5 con cuerpo ≥ 60% del rango
-5. **Fair Value Gap (FVG)** — imbalance en las últimas 7 velas M5 (el FVG se forma durante la vela de desplazamiento, 2-5 barras antes del MSS)
+### [ZB] Zone Bounce — rebote en zona HTF (4 capas top-down)
 
-La entrada es siempre a precio de mercado (cierre de la vela M5 del setup). El SL va más allá del extremo de la vela del sweep y el TP garantiza mínimo 2:1 R:R.
+1. **Zona activa (D1 / H4 / H1 / M15)** — ZoneEngine identifica swing highs/lows en 4 timeframes. Solo se considera un setup cuando el precio está dentro de `ZONE_PROXIMITY_POINTS` puntos de alguna zona. Pesos: D1=3, H4=2, H1=1, M15=0.5. Lookback: 100 candles para D1/H4/H1, 50 candles para M15.
 
-### Sweep de 2 velas
+2. **Sesgo HTF alineado (D1 + H4 + H1)** — BiasEngine detecta BOS/CHoCH en los 3 timeframes. El D1 fija la dirección; H4 o H1 deben confirmar. La zona debe coincidir con el sesgo (soporte → BULLISH, resistencia → BEARISH).
 
-Además del patrón clásico de 1 sola vela (mecha + cierre de vuelta en la misma vela), el bot detecta el patrón de 2 velas:
+3. **Impulso M15 confirmado** — MomentumEngine detecta el último BOS en M15 (los 50 candles más recientes). Solo se acepta BOS; la dirección debe coincidir con el sesgo HTF.
 
-- **Vela 1** — mecha por encima del EQH (o debajo del EQL) sin cerrar de vuelta
-- **Vela 2** — cierra por debajo del EQH (o encima del EQL) confirmando el rechazo
+4. **Entrada M5 (FVG + desplazamiento)** — FVG en la dirección del sesgo y vela de desplazamiento (cuerpo ≥ 60% del rango) en las últimas velas M5. La entrada es al cierre de la vela M5. El SL va más allá de la zona HTF activa (`ZONE_SL_BUFFER_POINTS`) y el TP garantiza mínimo 2:1 R:R.
+
+### [EP] EMA Pullback — pullback a EMA dinámica (tendencia + momentum)
+
+1. **Tendencia H1 confirmada** — EMA8 > EMA34 en H1 → BULLISH; EMA8 < EMA34 → BEARISH. La separación entre EMAs debe ser ≥ `EMA_SPREAD_MIN` (default 12 pts) para evitar mercados choppy.
+
+2. **Confirmación de pullback superficial** — si `EP_M15_ALIGN=true`, la EMA8 en M15 debe mantenerse al mismo lado de la EMA34 (pullback poco profundo, sin cruce de tendencia).
+
+3. **Precio cerca de EMA34 en M15** — el precio actual debe estar dentro de `ZONE_PROXIMITY_POINTS` puntos de la EMA34 en M15 (zona dinámica de soporte/resistencia).
+
+4. **MACD confirma momentum** — el histograma MACD (EMA12-EMA26, signal 9) en M15 debe estar en la dirección del trade (>0 para BULLISH, <0 para BEARISH). El SL va más allá de la EMA34 en M15 (`ZONE_SL_BUFFER_POINTS`) y el TP garantiza mínimo 2:1 R:R.
 
 ## Filtros de riesgo
 
@@ -76,6 +85,7 @@ Antes de ejecutar cualquier orden, el bot pasa por los siguientes filtros en est
 | **Daily profit target** | Si la ganancia del día supera `MAX_DAILY_PROFIT_PERCENT` (default 3%), no se abren más posiciones. Protege las ganancias. |
 | **Weekly drawdown** | Si la pérdida de la semana supera `MAX_WEEKLY_DRAWDOWN_PERCENT` (default 5%), no se abren posiciones hasta el lunes siguiente. Referencia se resetea cada lunes. |
 | **Daily trade limit** | Si el número de trades del día alcanza `MAX_DAILY_TRADES`, no se abren más posiciones. `0` = sin límite (default). Se resetea automáticamente a medianoche UTC. |
+| **Consecutive loss circuit** | Si se cierran `MAX_CONSEC_LOSSES` pérdidas seguidas en el mismo día ET, no se abren más posiciones hasta el día siguiente. `0` = desactivado (default). |
 | **Signal cooldown** | Mínimo `SIGNAL_COOLDOWN_MINUTES` (default 30) entre señales del mismo tipo para evitar sobreoperación. |
 
 ### Ventanas bloqueadas por defecto (hora ET)
@@ -117,7 +127,7 @@ El bridge incluye un dashboard en `http://localhost:8000` con las siguientes sec
 - **Estado del bridge** — conexión MT5 (verde / rojo)
 - **Estado del bot** — semáforo en tiempo real con razón de bloqueo
 - **Licencia** — visualizar y validar la clave de licencia
-- **Configuración** — editar símbolo, riesgo, modo live, cooldown; límites de pérdida diaria/semanal y objetivo de ganancia diaria, cada uno con barra de progreso (verde → amarillo → rojo); máximo de trades diarios con gauge; toggles de TPs parciales, confirmación M15 y modo semi-automático; filtro de tamaño mínimo de FVG. Hot-reload sin reiniciar el bot.
+- **Configuración** — editar símbolo, riesgo, modo live, cooldown; límites de pérdida diaria/semanal y objetivo de ganancia diaria (con barras de progreso); máximo de trades diarios; filtros de entrada (SL mínimo, FVG mínimo, spread EMA mínimo, confirmación M15 para señal EP, circuit breaker de pérdidas consecutivas); gestión de posiciones (trigger break-even, buffer BE, toggle TP parcial); modo semi-automático. Hot-reload sin reiniciar el bot.
 - **Telegram** — configurar token y chat ID, toggle de notificaciones, botón de prueba
 - **Journal** — estadísticas (win rate, profit factor, avg R:R, P&L, rachas de pérdidas) + tabla de las últimas 20 operaciones con resultado y R:R real
 
@@ -125,7 +135,7 @@ El bridge incluye un dashboard en `http://localhost:8000` con las siguientes sec
 
 Los cambios guardados desde el dashboard se escriben en `config.json` en la raíz. El bot detecta el cambio automáticamente (sin reiniciar) vía `fs.watch`. Los parámetros con soporte hot-reload son:
 
-`SYMBOL`, `RISK_PERCENT`, `LIVE_TRADING`, `SIGNAL_COOLDOWN_MINUTES`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_DAILY_PROFIT_PERCENT`, `MAX_WEEKLY_DRAWDOWN_PERCENT`, `MAX_DAILY_TRADES`, `MIN_FVG_POINTS`, `PARTIAL_TP_ENABLED`, `M15_CONFIRMATION_ENABLED`, `TELEGRAM_ENABLED`, `LICENSE_KEY`, `BLOCKED_HOURS`
+`SYMBOL`, `RISK_PERCENT`, `LIVE_TRADING`, `SIGNAL_COOLDOWN_MINUTES`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_DAILY_PROFIT_PERCENT`, `MAX_WEEKLY_DRAWDOWN_PERCENT`, `MAX_DAILY_TRADES`, `MIN_SL_POINTS`, `MIN_FVG_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `MAX_CONSEC_LOSSES`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `TELEGRAM_ENABLED`, `LICENSE_KEY`, `BLOCKED_HOURS`
 
 > `SEMI_AUTO_MODE` **no** aplica hot-reload — requiere reiniciar el bot para activar el polling de Telegram.
 
@@ -226,7 +236,7 @@ npm run lint         # ESLint
 
 ## Backtest
 
-Replaya velas históricas de MT5 contra la misma estrategia de trading en vivo (LiquidityEngine → FVGEngine → EntryValidator) sin arriesgar capital.
+Replaya velas históricas de MT5 contra la misma estrategia de trading en vivo (ZoneEngine → BiasEngine → MomentumEngine → FVGDetector + EntryValidator) sin arriesgar capital.
 
 ### Requisitos
 
@@ -251,8 +261,9 @@ Parámetros disponibles:
 | `--balance` | `10000` | Balance inicial simulado en USD |
 | `--risk` | Desde `config.json` | % de riesgo por trade |
 | `--cooldown` | Desde `config.json` | Minutos de cooldown entre señales |
+| `--proximity` | Desde `config.json` | Puntos de proximidad a zona HTF |
 
-Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS`, `MIN_SL_POINTS`, `M15_CONFIRMATION_ENABLED` y `M1_CONFIRMATION_ENABLED` se leen automáticamente desde `config.json`.
+Los parámetros `BLOCKED_HOURS`, `MIN_FVG_POINTS`, `MIN_SL_POINTS`, `ZONE_PROXIMITY_POINTS`, `ZONE_SL_BUFFER_POINTS`, `EMA_SPREAD_MIN`, `EP_M15_ALIGN`, `BE_AT_POINTS`, `BE_BUFFER_POINTS`, `PARTIAL_TP_ENABLED`, `MAX_DAILY_DRAWDOWN_PERCENT`, `MAX_WEEKLY_DRAWDOWN_PERCENT` y `MAX_CONSEC_LOSSES` se leen automáticamente desde `config.json`.
 
 ### Salida
 
@@ -260,21 +271,25 @@ El backtest imprime en consola un resumen por trade y las métricas finales:
 
 ```
 ════════════════════════════════════════════════════════════════════════════════
- SPX500 Bot — Backtest │ SPX500  2025-01-01 → 2025-05-01
- Balance: $10,000.00 → $10,847.32  │  Risk: 1%  │  Cooldown: 30 min
+ SPX500 Bot — Backtest │ SPX500  2026-01-01 → 2026-05-25
+ Balance: $10000.00 → $10703.31  │  Risk: 1%  │  Cooldown: 15 min
 ════════════════════════════════════════════════════════════════════════════════
 
-  # │ Apertura (ET)     │ Dir  │    Entry │       SL │       TP │   R:R │ Resultado │    P&L ($)
+  #  Apertura (ET)      Tipo   Dir        Entry         SL         TP     R:R  Resultado     P&L ($)
 ────────────────────────────────────────────────────────────────────────────────
-  1 │ 2025-01-07 10:25  │ BUY  │  4750.50 │  4738.20 │  4774.90 │  2.00 │ ✓ WIN     │      +47.50
+  1  2026-01-29 09:40   [ZB]   SELL     6991.70    7000.35    6974.40   -1.00  ✗ LOSS      -100.00
 
 ════════════════════════════════════════════════════════════════════════════════
  RESULTADOS
 ════════════════════════════════════════════════════════════════════════════════
- Win rate:              65.2%
- Profit factor:         2.14
- Max drawdown:          4.2%
+ [ZB] Zone Bounce:      trades=17  W/L=8/9  WR=47.1%  P&L=+703.31
+ Total trades:          17
+ Win rate:              47.1%
+ Profit factor:         1.74
+ Max drawdown:          3.94%
 ```
+
+La columna `Tipo` indica el origen de la señal: `[ZB]` = Zone Bounce (rebote en zona HTF), `[EP]` = EMA Pullback (pullback a EMA34 dinámica), `[BP]` = Breakout Pullback (pullback a zona rota).
 
 Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backtest-SPX500-2025-01-01-2025-05-01.json`.
 
@@ -282,13 +297,16 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 
 | Aspecto | Comportamiento |
 |---|---|
-| Filtros activos | Session guard, cooldown, FVG size, M15 confirmation (si activo en config) |
-| Filtros omitidos | Daily drawdown / profit / trade count — el backtest evalúa señales sin cortar días |
+| Filtros activos | Session guard, cooldown, zona (D1/H4/H1 lookback 100c, M15 lookback 50c), sesgo multi-TF D1+H4+H1, impulso M15 BOS (50 candles), FVG size, SL mínimo |
+| Filtros simulados | Daily drawdown (`MAX_DAILY_DRAWDOWN_PERCENT`), weekly drawdown (`MAX_WEEKLY_DRAWDOWN_PERCENT`), consecutive loss circuit (`MAX_CONSEC_LOSSES`) |
+| Filtros omitidos | Profit target, daily trade count — el backtest evalúa señales sin esos cortes |
 | News filter | No simulado — requeriría datos históricos de noticias |
-| Entrada al mercado | Al cierre de la vela M5 del setup (precio de mercado), sin slippage; el FVG valida calidad pero no se usa como nivel de entrada |
+| Entrada al mercado | Al cierre de la vela M5 del setup (precio de mercado), sin slippage |
+| SL | Más allá de la zona HTF activa + `ZONE_SL_BUFFER_POINTS` puntos de buffer |
 | Salida | Se busca la primera vela M5 futura que toca TP o SL; si ambos se tocan en la misma vela, se asume SL primero (pesimista) salvo que el open ya esté pasado el TP |
-| Partial TPs | No simulados — resultado calculado sobre posición completa |
-| Warm-up | El motor de estrategia se precalienta con 5 días previos a `--from` + 100 velas M5 |
+| Partial TPs | Simulados cuando `PARTIAL_TP_ENABLED=true` — cierra 50% al trigger y continúa con el 50% restante |
+| Break-even | Simulado cuando `BE_AT_POINTS > 0` — mueve SL a entry + `BE_BUFFER_POINTS` al alcanzar el trigger |
+| Warm-up | 5 días previos a `--from` + 100 velas M5 para que D1/H4/H1/M15 tengan suficiente historia |
 
 ## Endpoints del bridge
 
@@ -330,21 +348,24 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | Bridge caído | 🔌 Bridge MT5 desconectado |
 | Bridge recuperado | ✅ Bridge MT5 reconectado |
 
-## Filtros de estrategia (opcionales)
+## Filtros de estrategia
 
 | Filtro | Parámetro | Comportamiento |
 |---|---|---|
 | **Tamaño mínimo de FVG** | `MIN_FVG_POINTS` | Ignora FVGs cuyo gap sea menor al valor en puntos. `0` = desactivado. |
-| **Confirmación M15** | `M15_CONFIRMATION_ENABLED` | Exige que el sesgo en M15 esté alineado con el sesgo D1 antes de entrar. Reduce falsos setups. |
-| **Confirmación M1** | `M1_CONFIRMATION_ENABLED` | Exige una vela de desplazamiento en M1 tras el cierre de la vela M5 del setup. Usa la vela M1 para refinar el precio de entrada; el SL sigue basado en la vela del sweep en M5. |
+| **Distancia mínima de SL** | `MIN_SL_POINTS` | Descarta setups donde la distancia entry → SL es menor al valor. `0` = desactivado. |
+| **Proximidad de zona** | `ZONE_PROXIMITY_POINTS` | Radio en puntos alrededor de una zona HTF (o EMA34 para EP) para considerar que el precio está "en zona". Default 20. |
+| **Buffer de SL en zona** | `ZONE_SL_BUFFER_POINTS` | Puntos adicionales más allá del nivel de zona (o EMA34) para colocar el SL. Default 8. |
+| **Spread mínimo de EMA** | `EMA_SPREAD_MIN` | Para señal [EP]: separación mínima entre EMA8 y EMA34 en H1 (evita mercados choppy). Default 12. |
+| **Confirmación M15 [EP]** | `EP_M15_ALIGN` | Para señal [EP]: exige que EMA8 en M15 esté al mismo lado de EMA34 (pullback superficial). Default `true`. |
 
 ## Gestión de posiciones
 
 Una vez abierta una posición, el bot la monitorea en cada ciclo de sync (10s):
 
-- **Break-even** — cuando el precio se mueve 1R a favor, el SL se mueve al precio de entrada (operación sin riesgo). Solo cuando `PARTIAL_TP_ENABLED=false`.
-- **Partial TP** (opcional) — cuando `PARTIAL_TP_ENABLED=true` y el precio se mueve 1R a favor: se cierra el 50% de la posición y el SL se mueve a break-even. El 50% restante sigue corriendo.
-- **Trailing stop** — cuando el precio se mueve 2R a favor, el SL sigue al precio manteniéndose a 1R de distancia.
+- **Break-even** (opcional) — cuando `BE_AT_POINTS > 0` y el precio se mueve ese número de puntos a favor, el SL se mueve al precio de entrada + `BE_BUFFER_POINTS`. Aplica solo cuando `PARTIAL_TP_ENABLED=false`. Desactivado por defecto (`BE_AT_POINTS=0`).
+- **Partial TP** (opcional) — cuando `PARTIAL_TP_ENABLED=true` y `BE_AT_POINTS > 0`, al alcanzar el trigger se cierra el 50% de la posición al precio actual y el SL se mueve a `entry + BE_BUFFER_POINTS`. El 50% restante corre hasta el TP completo. Desactivado por defecto.
+- **Trailing stop** — cuando el precio se mueve 2R a favor, el SL sigue al precio manteniéndose a 1R de distancia. Siempre activo.
 
 ## Semáforo de estado del bot
 
@@ -425,10 +446,16 @@ npm test
 | `MAX_DAILY_PROFIT_PERCENT` | % objetivo de ganancia diaria (para al alcanzarlo) | `3` |
 | `MAX_WEEKLY_DRAWDOWN_PERCENT` | % máximo de pérdida semanal permitida (resetea el lunes) | `5` |
 | `MAX_DAILY_TRADES` | Máximo de trades por día (`0` = sin límite) | `0` |
+| `MIN_SL_POINTS` | Distancia mínima entry→SL en puntos para aceptar el setup (`0` = sin filtro) | `0` |
 | `MIN_FVG_POINTS` | Tamaño mínimo del FVG en puntos para aceptar la entrada (`0` = sin filtro) | `0` |
-| `PARTIAL_TP_ENABLED` | `true` para cerrar 50% en 1R y dejar correr el resto | `false` |
-| `M15_CONFIRMATION_ENABLED` | `true` para exigir sesgo M15 alineado con D1 antes de entrar | `false` |
-| `M1_CONFIRMATION_ENABLED` | `true` para exigir vela de desplazamiento M1 tras el setup M5; refina el precio de entrada | `false` |
+| `ZONE_PROXIMITY_POINTS` | Radio en puntos para considerar que el precio está en una zona HTF o EMA34 | `20` |
+| `ZONE_SL_BUFFER_POINTS` | Puntos adicionales más allá de la zona/EMA34 para colocar el SL | `8` |
+| `EMA_SPREAD_MIN` | Separación mínima EMA8/34 en H1 para señal [EP] (`0` = desactivado) | `12` |
+| `EP_M15_ALIGN` | Exigir EMA8 M15 al mismo lado que EMA34 en señal [EP] (pullback superficial) | `true` |
+| `MAX_CONSEC_LOSSES` | Pérdidas consecutivas antes de pausar el resto del día (`0` = desactivado) | `0` |
+| `BE_AT_POINTS` | Puntos a favor para activar break-even/partial TP (`0` = desactivado) | `0` |
+| `BE_BUFFER_POINTS` | Puntos sobre entry al mover SL a BE | `0.25` |
+| `PARTIAL_TP_ENABLED` | `true` para cerrar 50% al trigger de BE y dejar correr el resto (requiere `BE_AT_POINTS > 0`) | `false` |
 | `SEMI_AUTO_MODE` | `true` para enviar alerta de Telegram con botones antes de ejecutar (requiere reinicio) | `false` |
 | `TELEGRAM_ENABLED` | `false` para silenciar notificaciones | `true` |
 | `LICENSE_KEY` | UUID de licencia (también editable en dashboard) | — |

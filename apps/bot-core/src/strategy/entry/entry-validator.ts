@@ -1,34 +1,16 @@
+import type { MomentumDirection } from '../momentum/momentum-types';
+
 interface ValidationContext {
   htfBias: 'BULLISH' | 'BEARISH';
-
-  sweepDirection:
-    | 'BULLISH'
-    | 'BEARISH';
-
-  mssDirection:
-    | 'BULLISH'
-    | 'BEARISH';
-
+  m15Momentum: MomentumDirection;
   hasDisplacement: boolean;
-
   hasFVG: boolean;
 }
 
 export class EntryValidator {
-  validate(
-    context: ValidationContext,
-  ): boolean {
-    const biasAligned =
-      context.htfBias ===
-      context.mssDirection;
-
-    const sweepAligned =
-      context.sweepDirection ===
-      context.mssDirection;
-
+  validate(context: ValidationContext): boolean {
     return (
-      biasAligned &&
-      sweepAligned &&
+      context.m15Momentum === context.htfBias &&
       context.hasDisplacement &&
       context.hasFVG
     );

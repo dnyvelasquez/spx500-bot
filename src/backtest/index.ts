@@ -55,9 +55,11 @@ function tradeRow(t: BacktestTrade): string {
   const icon = t.result === 'WIN' ? '✓' : t.result === 'LOSS' ? '✗' : '○';
   const pnl = (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2);
   const rr = t.actualRr !== null ? t.actualRr.toFixed(2) : 'n/a';
+  const tag = t.signalType === 'BREAKOUT' ? '[BP]' : t.signalType === 'EMA_PB' ? '[EP]' : '[ZB]';
   return [
     pad(t.tradeNumber, 3, true),
     pad(t.openTimeISO, 17),
+    pad(tag, 5),
     pad(t.side, 5),
     pad(t.entry.toFixed(2), 9, true),
     pad(t.sl.toFixed(2), 9, true),
@@ -84,6 +86,7 @@ function printReport(r: BacktestReport): void {
     console.log([
       pad('#', 3, true),
       pad('Apertura (ET)', 17),
+      pad('Tipo', 5),
       pad('Dir', 5),
       pad('Entry', 9, true),
       pad('SL', 9, true),
@@ -97,9 +100,26 @@ function printReport(r: BacktestReport): void {
     console.log();
   }
 
+  // Per-signal-type stats
+  const zb = r.trades.filter(t => t.signalType === 'ZONE');
+  const bp = r.trades.filter(t => t.signalType === 'BREAKOUT');
+  const ep = r.trades.filter(t => t.signalType === 'EMA_PB');
+  const statLine = (label: string, ts: BacktestTrade[]) => {
+    const w = ts.filter(t => t.result === 'WIN').length;
+    const l = ts.filter(t => t.result === 'LOSS').length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    const wr = ts.length > 0 ? ((w / (w + l)) * 100).toFixed(1) : '-';
+    const pnlStr = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+    return ` ${label}  trades=${ts.length}  W/L=${w}/${l}  WR=${wr}%  P&L=${pnlStr}`;
+  };
+
   console.log(SEP);
   console.log(' RESULTADOS');
   console.log(SEP);
+  console.log(statLine('[ZB] Zone Bounce:    ', zb));
+  console.log(statLine('[EP] EMA Pullback:   ', ep));
+  console.log(statLine('[BP] Breakout+PB:    ', bp));
+  console.log(sep);
   console.log(` Total trades:          ${m.totalTrades}`);
   console.log(` Wins / Losses / Open:  ${m.wins} / ${m.losses} / ${m.openTrades}`);
   console.log(` Win rate:              ${m.winRate.toFixed(1)}%`);
@@ -119,15 +139,23 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cfg = readConfig();
 
-  const symbol   = args['symbol']   ?? (cfg['SYMBOL'] as string | undefined)   ?? 'SPX500';
-  const from     = args['start']    ?? args['from'];
-  const to       = args['end']      ?? args['to'];
-  const balance  = parseFloat(args['balance'] ?? '10000');
-  const risk     = parseFloat(args['risk']    ?? String(cfg['RISK_PERCENT']   ?? 1));
-  const cooldown = parseInt(args['cooldown']  ?? String(cfg['SIGNAL_COOLDOWN_MINUTES'] ?? 30), 10);
+  const symbol    = args['symbol']    ?? (cfg['SYMBOL'] as string | undefined)   ?? 'SPX500';
+  const from      = args['start']    ?? args['from'];
+  const to        = args['end']      ?? args['to'];
+  const balance   = parseFloat(args['balance']   ?? '10000');
+  const risk      = parseFloat(args['risk']      ?? String(cfg['RISK_PERCENT']   ?? 1));
+  const cooldown  = parseInt(args['cooldown']    ?? String(cfg['SIGNAL_COOLDOWN_MINUTES'] ?? 30), 10);
+  const proximity    = parseFloat(args['proximity']    ?? String(cfg['ZONE_PROXIMITY_POINTS'] ?? 20));
+  const emaSpread    = parseFloat(args['ema-spread']   ?? String(cfg['EMA_SPREAD_MIN'] ?? 0));
+  const epM15Align   = (args['ep-m15-align']   ?? String(cfg['EP_M15_ALIGN']   ?? 'false')) === 'true';
+  const epMacdSlope  = (args['ep-macd-slope']  ?? String(cfg['EP_MACD_SLOPE']  ?? 'false')) === 'true';
+  const beMode       = args['be-mode'] ?? 'fixed';                        // 'fixed' | '1r'
+  const beAtRaw      = parseFloat(args['be-at-points'] ?? String(cfg['BE_AT_POINTS'] ?? 0));
+  const beAtPoints   = beMode === '1r' ? -1 : beAtRaw;
+  const partialTp    = (args['partial-tp'] ?? String(cfg['PARTIAL_TP_ENABLED'] ?? 'false')) === 'true';
 
   if (!from || !to) {
-    console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30]\n');
+    console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
     process.exit(1);
   }
 
@@ -141,8 +169,17 @@ async function main(): Promise<void> {
     blockedHours: (cfg['BLOCKED_HOURS'] as typeof DEFAULT_BLOCKED_HOURS | undefined) ?? DEFAULT_BLOCKED_HOURS,
     minFvgPoints: (cfg['MIN_FVG_POINTS'] as number | undefined) ?? 0,
     minSlPoints: (cfg['MIN_SL_POINTS'] as number | undefined) ?? 0,
-    m15ConfirmationEnabled: (cfg['M15_CONFIRMATION_ENABLED'] as boolean | undefined) ?? false,
-    m1ConfirmationEnabled: (cfg['M1_CONFIRMATION_ENABLED'] as boolean | undefined) ?? false,
+    zoneProximityPoints: proximity,
+    zoneSlBufferPoints: (cfg['ZONE_SL_BUFFER_POINTS'] as number | undefined) ?? 5,
+    emaSpreadMin: emaSpread,
+    epUseM15Align: epM15Align,
+    epUseMacdSlope: epMacdSlope,
+    maxDailyDrawdownPct:  (cfg['MAX_DAILY_DRAWDOWN_PERCENT']  as number | undefined) ?? 0,
+    maxWeeklyDrawdownPct: (cfg['MAX_WEEKLY_DRAWDOWN_PERCENT'] as number | undefined) ?? 0,
+    maxConsecLosses:      (cfg['MAX_CONSEC_LOSSES']           as number | undefined) ?? 0,
+    beAtPoints,
+    beBuffer:   (cfg['BE_BUFFER_POINTS'] as number | undefined) ?? 0,
+    partialTpEnabled: partialTp,
   });
 
   printReport(report);
