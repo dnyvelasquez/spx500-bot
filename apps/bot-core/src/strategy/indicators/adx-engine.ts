@@ -71,4 +71,54 @@ export class ADXEngine {
     const val = adx[adx.length - 1];
     return val !== undefined ? Math.round(val * 100) / 100 : null;
   }
+
+  // Returns ADX, +DI (pdi), and -DI (ndi) for the last bar.
+  // Useful for directional bias detection even in low-ADX (choppy) markets.
+  lastWithDI(candles: Candle[], period = 14): { adx: number; pdi: number; ndi: number } | null {
+    if (candles.length < period * 2 + 1) return null;
+
+    const trs: number[] = [];
+    const pdms: number[] = [];
+    const ndms: number[] = [];
+
+    for (let i = 1; i < candles.length; i++) {
+      const cur  = candles[i]!;
+      const prev = candles[i - 1]!;
+      trs.push(Math.max(cur.high - cur.low, Math.abs(cur.high - prev.close), Math.abs(cur.low - prev.close)));
+      const upMove   = cur.high - prev.high;
+      const downMove = prev.low  - cur.low;
+      pdms.push(upMove   > downMove && upMove   > 0 ? upMove   : 0);
+      ndms.push(downMove > upMove   && downMove > 0 ? downMove : 0);
+    }
+
+    const atr     = this.wilderSum(trs,  period);
+    const pdmSmth = this.wilderSum(pdms, period);
+    const ndmSmth = this.wilderSum(ndms, period);
+
+    const lastIdx = atr.length - 1;
+    if (lastIdx < 0 || atr[lastIdx] === 0) return null;
+
+    const pdi = 100 * pdmSmth[lastIdx]! / atr[lastIdx]!;
+    const ndi = 100 * ndmSmth[lastIdx]! / atr[lastIdx]!;
+
+    const dx: number[] = [];
+    for (let i = 0; i < atr.length; i++) {
+      if (atr[i]! === 0) continue;
+      const p = 100 * pdmSmth[i]! / atr[i]!;
+      const n = 100 * ndmSmth[i]! / atr[i]!;
+      const s = p + n;
+      if (s === 0) continue;
+      dx.push(100 * Math.abs(p - n) / s);
+    }
+
+    const adxArr = this.wilderAvg(dx, period);
+    const adxVal = adxArr[adxArr.length - 1];
+    if (adxVal === undefined) return null;
+
+    return {
+      adx: Math.round(adxVal * 100) / 100,
+      pdi: Math.round(pdi * 100) / 100,
+      ndi: Math.round(ndi * 100) / 100,
+    };
+  }
 }

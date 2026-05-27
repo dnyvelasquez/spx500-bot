@@ -167,6 +167,10 @@ async function main(): Promise<void> {
   const ciMax            = parseFloat(args['ci-max']   ?? '0');
   const ciBuyOnly        = (args['ci-buy-only'] ?? 'false') === 'true';
   const maxConsecLossDays   = parseInt(args['max-consec-loss-days'] ?? String(cfg['MAX_CONSEC_LOSS_DAYS'] ?? 0), 10);
+  const epD1Align           = (args['ep-d1-align'] ?? 'false') === 'true';
+  const epDiTfRaw = args['ep-di-tf'];
+  const epDiTf    = (epDiTfRaw === 'H4' || epDiTfRaw === 'D1') ? epDiTfRaw : undefined;
+  const epDiMinGap          = parseFloat(args['ep-di-gap'] ?? '0');
   if (!from || !to) {
     console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
     process.exit(1);
@@ -205,6 +209,9 @@ async function main(): Promise<void> {
     ciMax,
     ciBuyOnly,
     maxConsecLossDays,
+    epD1Align,
+    epDiTf,
+    epDiMinGap,
   });
 
   printReport(report);

@@ -63,6 +63,9 @@ export interface BacktestParams {
   ciMax?: number;       // 0=off; >0 skip signals when H4 CI exceeds this (e.g. 61.8)
   ciBuyOnly?: boolean;  // when true, only skip BUY signals in choppy regime
   maxConsecLossDays?: number;
+  epD1Align?: boolean;  // skip EP signals that oppose D1 EMA8 vs EMA34 direction
+  epDiTf?: 'H4' | 'D1'; // timeframe for +DI/-DI directional filter ('' = off)
+  epDiMinGap?: number;  // minimum +DI/-DI gap to enforce direction (0 = any gap)
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -255,6 +258,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     epAdxPeriod = 14, epAdxMin = 0, epH1AdxMin = 0, epH4Align = false,
     ciPeriod = 14, ciMax = 0, ciBuyOnly = false,
     maxConsecLossDays = 0,
+    epD1Align = false, epDiTf, epDiMinGap = 0,
   } = params;
 
   const fetchFrom = new Date(from + 'T00:00:00');
@@ -612,6 +616,27 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
 
     // Skip signal based on CI regime: all signals, or only BUY
     if (ciChoppy && (!ciBuyOnly || signal.direction === 'BULLISH')) continue;
+
+    // ── D1 EMA8/EMA34 directional filter ────────────────────────────────────
+    if (epD1Align && d1Window.length >= 35) {
+      const d1Ema8  = emaEngine.last(d1Window, 8);
+      const d1Ema34 = emaEngine.last(d1Window, 34);
+      if (d1Ema8 !== null && d1Ema34 !== null) {
+        if (signal.direction === 'BULLISH' && d1Ema8 < d1Ema34) continue; // D1 bearish → skip BUY
+        if (signal.direction === 'BEARISH' && d1Ema8 > d1Ema34) continue; // D1 bullish → skip SELL
+      }
+    }
+
+    // ── DMI +DI/-DI directional filter ──────────────────────────────────────
+    if (epDiTf) {
+      const diCandles = epDiTf === 'H4' ? h4Window : d1Window;
+      const di = adxEngine.lastWithDI(diCandles, epAdxPeriod);
+      if (di !== null) {
+        const gap = di.pdi - di.ndi;           // positive = bullish dominant
+        if (gap < -epDiMinGap && signal.direction === 'BULLISH') continue;  // -DI leads → skip BUY
+        if (gap > epDiMinGap  && signal.direction === 'BEARISH') continue;  // +DI leads → skip SELL
+      }
+    }
 
     // ── Cooldown ─────────────────────────────────────────────────────────────
     const elapsed = currentTime - (lastSignalTime.get(signal.direction) ?? 0);
