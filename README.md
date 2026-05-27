@@ -356,6 +356,7 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | **Confirmación M15 [EP]** | `EP_M15_ALIGN` | Para señal [EP]: exige que EMA8 en M15 esté al mismo lado de EMA34 (pullback superficial). Default `true`. |
 | **Hora mínima [EP]** | `EP_MIN_HOUR` | Para señal [EP]: descarta señales antes de esta hora ET (ej. `10` bloquea 9:xx). `0` = desactivado. Default `10`. |
 | **Hora máxima [EP]** | `EP_MAX_HOUR` | Para señal [EP]: descarta señales a partir de esta hora ET (ej. `13` bloquea 13:xx en adelante). `0` = desactivado. Default `0`. |
+| **ADX mínimo [EP]** | `EP_ADX_MIN` | Para señal [EP]: descarta señales cuando el ADX en H4 es menor a este valor (mercado en rango). `0` = desactivado. Default `0`. Periodo configurable con `EP_ADX_PERIOD` (default 14). |
 
 ## Gestión de posiciones
 
@@ -449,7 +450,9 @@ npm test
 | `EMA_SPREAD_MIN` | Separación mínima EMA8/34 en H1 para señal [EP] (`0` = desactivado) | `12` |
 | `EP_M15_ALIGN` | Exigir EMA8 M15 al mismo lado que EMA34 en señal [EP] (pullback superficial) | `true` |
 | `EP_MIN_HOUR` | Hora ET mínima para señal [EP] (`0` = desactivado) | `10` |
-| `EP_MAX_HOUR` | Hora ET máxima (exclusiva) para señal [EP] (`0` = desactivado) | `0` |
+| `EP_MAX_HOUR` | Hora ET máxima (exclusiva) para señal [EP] (`0` = desactivado) | `13` |
+| `EP_ADX_PERIOD` | Periodo para cálculo ADX en H4 para señal [EP] | `14` |
+| `EP_ADX_MIN` | ADX H4 mínimo para señal [EP] (`0` = desactivado) | `0` |
 | `MAX_CONSEC_LOSSES` | Pérdidas consecutivas antes de pausar el resto del día (`0` = desactivado) | `0` |
 | `BE_AT_POINTS` | Puntos a favor para activar break-even/partial TP (`0` = desactivado) | `0` |
 | `BE_BUFFER_POINTS` | Puntos sobre entry al mover SL a BE | `0.25` |

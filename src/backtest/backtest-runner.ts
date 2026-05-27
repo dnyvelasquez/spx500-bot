@@ -11,6 +11,7 @@ import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
 import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
 import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
+import { ADXEngine } from '@bot-core/strategy/indicators/adx-engine';
 import type { Candle } from '@bot-core/services/mt5/mt5.types';
 
 import type { BacktestTrade, BacktestReport, BacktestMetrics, TradeResult, SignalType } from './backtest.types';
@@ -54,6 +55,8 @@ export interface BacktestParams {
   epSkipMonday?: boolean;
   epMinHour?: number;
   epMaxHour?: number;
+  epAdxPeriod?: number;
+  epAdxMin?: number;
   maxConsecLossDays?: number;
 }
 
@@ -244,6 +247,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     beAtPoints, beBuffer, partialTpEnabled,
     enableZB = true, enableEP = true,
     epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0, epMaxHour = 0,
+    epAdxPeriod = 14, epAdxMin = 0,
     maxConsecLossDays = 0,
   } = params;
 
@@ -290,6 +294,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   const positionSizing = new PositionSizing();
   const emaEngine = new EMAEngine();
   const macdEngine = new MACDEngine();
+  const adxEngine = new ADXEngine();
 
   // ── Signal evaluators ────────────────────────────────────────────────────────
 
@@ -420,7 +425,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   }
 
   function evalEMAPullback(
-    h1: Candle[], m15: Candle[], m5All: Candle[], i: number,
+    h4: Candle[], h1: Candle[], m15: Candle[], m5All: Candle[], i: number,
     useM15Align: boolean, useMacdSlope: boolean, candleTs: number,
   ): SignalCandidate | null {
     // EP-specific filters: Monday and early-session exclusions
@@ -458,6 +463,12 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     // Price must be near M15 EMA 34 (pullback zone)
     const currentPrice = m5All[i]!.close;
     if (Math.abs(currentPrice - m15Ema34) > zoneProximityPoints) return null;
+
+    // ADX on H4: skip if market is ranging (trend strength too low)
+    if (epAdxMin > 0) {
+      const adx = adxEngine.last(h4, epAdxPeriod);
+      if (adx === null || adx < epAdxMin) return null;
+    }
 
     // MACD histogram on M15 must confirm trend direction
     const macd = macdEngine.analyze(m15);
@@ -569,7 +580,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     // ── Evaluar señal: ZB primero, EMA Pullback como fallback ────────────────
     const signal =
       (enableZB ? evalZoneBounce(d1Window, h4Window, h1Window, m15Window, m5Candles, i) : null) ??
-      (enableEP ? evalEMAPullback(h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope, candle.time) : null);
+      (enableEP ? evalEMAPullback(h4Window, h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope, candle.time) : null);
 
     if (!signal) continue;
 

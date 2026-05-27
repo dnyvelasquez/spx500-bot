@@ -40,6 +40,8 @@
   "EP_SKIP_MONDAY": true,
   "EP_MIN_HOUR": 10,
   "EP_MAX_HOUR": 13,
+  "EP_ADX_PERIOD": 14,
+  "EP_ADX_MIN": 0,
   "BE_AT_POINTS": 0.0,
   "BE_BUFFER_POINTS": 0.25,
   "PARTIAL_TP_ENABLED": false,

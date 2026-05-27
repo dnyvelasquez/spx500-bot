@@ -39,6 +39,8 @@ interface BotConfig {
   EP_SKIP_MONDAY?: boolean;
   EP_MIN_HOUR?: number;
   EP_MAX_HOUR?: number;
+  EP_ADX_PERIOD?: number;
+  EP_ADX_MIN?: number;
   MAX_CONSEC_LOSS_DAYS?: number;
 }
 
@@ -74,7 +76,9 @@ class ConfigService {
   get epM15Align(): boolean { return this.config.EP_M15_ALIGN ?? true; }
   get epSkipMonday(): boolean { return this.config.EP_SKIP_MONDAY ?? false; }
   get epMinHour(): number { return this.config.EP_MIN_HOUR ?? 0; }
-  get epMaxHour(): number { return this.config.EP_MAX_HOUR ?? 0; }
+  get epMaxHour(): number    { return this.config.EP_MAX_HOUR   ?? 0;  }
+  get epAdxPeriod(): number  { return this.config.EP_ADX_PERIOD ?? 14; }
+  get epAdxMin(): number     { return this.config.EP_ADX_MIN    ?? 0;  }
   get maxConsecLossDays(): number { return this.config.MAX_CONSEC_LOSS_DAYS ?? 0; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env

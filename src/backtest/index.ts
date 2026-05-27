@@ -158,7 +158,9 @@ async function main(): Promise<void> {
   const epMinSlPoints    = parseFloat(args['ep-min-sl'] ?? String(cfg['EP_MIN_SL_POINTS'] ?? 0));
   const epSkipMonday     = (args['ep-skip-monday'] ?? String(cfg['EP_SKIP_MONDAY'] ?? 'false')) === 'true';
   const epMinHour        = parseInt(args['ep-min-hour'] ?? String(cfg['EP_MIN_HOUR'] ?? 0), 10);
-  const epMaxHour        = parseInt(args['ep-max-hour'] ?? String(cfg['EP_MAX_HOUR'] ?? 0), 10);
+  const epMaxHour        = parseInt(args['ep-max-hour']   ?? String(cfg['EP_MAX_HOUR']   ?? 0),  10);
+  const epAdxPeriod      = parseInt(args['ep-adx-period'] ?? String(cfg['EP_ADX_PERIOD'] ?? 14), 10);
+  const epAdxMin         = parseFloat(args['ep-adx-min'] ?? String(cfg['EP_ADX_MIN']     ?? 0));
   const maxConsecLossDays = parseInt(args['max-consec-loss-days'] ?? String(cfg['MAX_CONSEC_LOSS_DAYS'] ?? 0), 10);
   if (!from || !to) {
     console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
@@ -191,6 +193,8 @@ async function main(): Promise<void> {
     epSkipMonday,
     epMinHour,
     epMaxHour,
+    epAdxPeriod,
+    epAdxMin,
     maxConsecLossDays,
   });
 

@@ -23,6 +23,7 @@ import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
 import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
 import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
+import { ADXEngine } from '@bot-core/strategy/indicators/adx-engine';
 import { ExecutionValidator } from '@bot-core/services/execution/execution-validator';
 import { MT5Executor } from '@bot-core/services/execution/mt5-executor';
 import { PositionMonitor } from '@bot-core/services/execution/position-monitor';
@@ -59,6 +60,7 @@ export class Application {
   private readonly entryValidator = new EntryValidator();
   private readonly emaEngine = new EMAEngine();
   private readonly macdEngine = new MACDEngine();
+  private readonly adxEngine = new ADXEngine();
   private readonly positionSizing = new PositionSizing();
   private readonly executionValidator = new ExecutionValidator();
   private readonly executor = new MT5Executor();
@@ -599,6 +601,7 @@ export class Application {
     if (configService.epMinHour > 0 && hourNum < configService.epMinHour) return null;
     if (configService.epMaxHour > 0 && hourNum >= configService.epMaxHour) return null;
 
+    const h4 = this.marketData.getCandles(symbol, 'H4');
     const h1 = this.marketData.getCandles(symbol, 'H1');
     const m15 = this.marketData.getCandles(symbol, 'M15');
     const m5 = this.marketData.getCandles(symbol, 'M5');
@@ -625,6 +628,11 @@ export class Application {
 
     const currentPrice = m5[m5.length - 1].close;
     if (Math.abs(currentPrice - m15Ema34) > configService.zoneProximityPoints) return null;
+
+    if (configService.epAdxMin > 0) {
+      const adx = this.adxEngine.last(h4, configService.epAdxPeriod);
+      if (adx === null || adx < configService.epAdxMin) return null;
+    }
 
     const macd = this.macdEngine.analyze(m15);
     if (!macd) return null;
