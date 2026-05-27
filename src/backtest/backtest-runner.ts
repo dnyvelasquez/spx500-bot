@@ -54,6 +54,7 @@ export interface BacktestParams {
   epMinSlPoints?: number;
   epSkipMonday?: boolean;
   epMinHour?: number;
+  maxConsecLossDays?: number;
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -243,6 +244,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     beAtPoints, beBuffer, partialTpEnabled,
     enableZB = true, enableEP = true,
     epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0,
+    maxConsecLossDays = 0,
   } = params;
 
   const fetchFrom = new Date(from + 'T00:00:00');
@@ -501,12 +503,15 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   let d1Ptr = 0;
 
   // ── Daily / weekly drawdown guard state ─────────────────────────────────────
-  const etDay  = (ts: number) => new Date(ts * 1000).toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
+  const etDay    = (ts: number) => new Date(ts * 1000).toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
+  const isMonday = (ts: number) => new Date(ts * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' }) === 'Mon';
 
   let currentDayKey  = '';
   let dayRefBalance  = initialBalance;
   let consecLosses   = 0;
   let circuitDay     = '';  // ET day when circuit breaker is active
+  let consecBadDays  = 0;  // consecutive days where circuit breaker fired
+  let pauseUntilMon  = false;
 
   console.log(`\nReplaying ${m5Candles.length} M5 candles...`);
 
@@ -529,11 +534,25 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     // ── Daily / weekly guard: reset reference at start of each new period ───
     const dk = etDay(currentTime);
     if (dk !== currentDayKey) {
+      // Update consecutive bad days before resetting daily state
+      if (currentDayKey !== '') {
+        const dayWasNegative = balance < dayRefBalance;
+        if (dayWasNegative) {
+          consecBadDays++;
+          if (maxConsecLossDays > 0 && consecBadDays >= maxConsecLossDays) pauseUntilMon = true;
+        } else {
+          consecBadDays = 0;  // profitable/breakeven day resets the streak
+        }
+
+      }
+      // Monday resets the weekly pause
+      if (isMonday(currentTime)) { consecBadDays = 0; pauseUntilMon = false; }
       currentDayKey = dk;
       dayRefBalance = balance;
-      consecLosses = 0;   // reset per-day consecutive count
-      circuitDay = '';    // reset circuit breaker for new day
+      consecLosses = 0;
+      circuitDay = '';
     }
+    if (pauseUntilMon) continue;
     if (maxDailyDrawdownPct > 0 && dayRefBalance > 0) {
       const dd = (dayRefBalance - balance) / dayRefBalance * 100;
       if (dd >= maxDailyDrawdownPct) continue;

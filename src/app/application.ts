@@ -84,6 +84,9 @@ export class Application {
   private marketOpen = false;
   private approvalPending = false;
   private eodCloseDone = false;
+  private dayOpenBalance = 0;
+  private consecBadDays = 0;
+  private pauseUntilMon = false;
 
   constructor() {
     this.telegramService = new TelegramService();
@@ -176,6 +179,8 @@ export class Application {
           if (!this.eodCloseDone && this.openPositionTickets.size > 0) {
             await this.closeAllPositionsEOD(symbol);
           }
+        } else if (this.pauseUntilMon) {
+          logger.debug('Signal evaluation skipped — consecutive bad-days pause active until Monday');
         } else {
           const signal = this.evaluateZoneSignal(symbol) ?? this.evaluateEMAPullbackSignal(symbol);
           if (signal) {
@@ -194,12 +199,29 @@ export class Application {
         const accountRes = await this.mt5.getAccount();
         if (accountRes.success && accountRes.data) {
           this.lastKnownBalance = accountRes.data.balance;
+          this.dayOpenBalance = accountRes.data.balance;
           this.drawdownGuard.setReference(accountRes.data.balance);
           this.consecLossGuard.resetDay();
         }
+        // Monday resets the weekly pause
+        const todayIsMonday = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(new Date()) === 'Mon';
+        if (todayIsMonday) { this.consecBadDays = 0; this.pauseUntilMon = false; }
         await this.telegramService.notifyMarketOpen();
       } else if (!isOpen && this.marketOpen) {
         this.marketOpen = false;
+        // Track consecutive bad days (days where balance ended below open)
+        const maxConsecLossDays = configService.maxConsecLossDays;
+        if (maxConsecLossDays > 0 && this.dayOpenBalance > 0) {
+          if (this.lastKnownBalance < this.dayOpenBalance) {
+            this.consecBadDays++;
+            if (this.consecBadDays >= maxConsecLossDays) {
+              this.pauseUntilMon = true;
+              logger.warn({ consecBadDays: this.consecBadDays, limit: maxConsecLossDays }, 'Consecutive bad-days limit reached — pausing until Monday');
+            }
+          } else {
+            this.consecBadDays = 0;
+          }
+        }
         await this.telegramService.notifyMarketClosed();
       }
 

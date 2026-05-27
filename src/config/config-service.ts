@@ -37,6 +37,7 @@ interface BotConfig {
   EMA_SPREAD_MIN?: number;
   EP_M15_ALIGN?: boolean;
   EP_SKIP_MONDAY?: boolean;
+  MAX_CONSEC_LOSS_DAYS?: number;
 }
 
 const CONFIG_PATH = path.resolve(__dirname, '..', '..', 'config.json');
@@ -70,6 +71,7 @@ class ConfigService {
   get emaSpreadMin(): number { return this.config.EMA_SPREAD_MIN ?? 0; }
   get epM15Align(): boolean { return this.config.EP_M15_ALIGN ?? true; }
   get epSkipMonday(): boolean { return this.config.EP_SKIP_MONDAY ?? false; }
+  get maxConsecLossDays(): number { return this.config.MAX_CONSEC_LOSS_DAYS ?? 0; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env
   get licenseKey(): string | undefined {
