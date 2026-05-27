@@ -11,7 +11,6 @@ import { EntryValidator } from '@bot-core/strategy/entry/entry-validator';
 import { PositionSizing } from '@bot-core/strategy/risk/position-sizing';
 import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
 import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
-
 import type { Candle } from '@bot-core/services/mt5/mt5.types';
 
 import type { BacktestTrade, BacktestReport, BacktestMetrics, TradeResult, SignalType } from './backtest.types';
@@ -54,6 +53,7 @@ export interface BacktestParams {
   epMinSlPoints?: number;
   epSkipMonday?: boolean;
   epMinHour?: number;
+  epMaxHour?: number;
   maxConsecLossDays?: number;
 }
 
@@ -243,7 +243,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     maxDailyDrawdownPct, maxConsecLosses,
     beAtPoints, beBuffer, partialTpEnabled,
     enableZB = true, enableEP = true,
-    epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0,
+    epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0, epMaxHour = 0,
     maxConsecLossDays = 0,
   } = params;
 
@@ -424,11 +424,13 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     useM15Align: boolean, useMacdSlope: boolean, candleTs: number,
   ): SignalCandidate | null {
     // EP-specific filters: Monday and early-session exclusions
-    if (epSkipMonday || epMinHour > 0) {
+    if (epSkipMonday || epMinHour > 0 || epMaxHour > 0) {
       const dtET = new Date(candleTs * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hour12: false });
       const [weekday, hourStr] = dtET.split(', ');
+      const hourNum = parseInt(hourStr ?? '0', 10);
       if (epSkipMonday && weekday === 'Mon') return null;
-      if (epMinHour > 0 && parseInt(hourStr ?? '0', 10) < epMinHour) return null;
+      if (epMinHour > 0 && hourNum < epMinHour) return null;
+      if (epMaxHour > 0 && hourNum >= epMaxHour) return null;
     }
     if (h1.length < 40 || m15.length < 40) return null;
 

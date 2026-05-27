@@ -594,8 +594,10 @@ export class Application {
   private evaluateEMAPullbackSignal(symbol: string): ZoneTradeSignal | null {
     const nowET = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hour12: false }).format(new Date());
     const [weekday, hourStr] = nowET.split(', ');
+    const hourNum = parseInt(hourStr ?? '0', 10);
     if (configService.epSkipMonday && weekday === 'Mon') return null;
-    if (configService.epMinHour > 0 && parseInt(hourStr ?? '0', 10) < configService.epMinHour) return null;
+    if (configService.epMinHour > 0 && hourNum < configService.epMinHour) return null;
+    if (configService.epMaxHour > 0 && hourNum >= configService.epMaxHour) return null;
 
     const h1 = this.marketData.getCandles(symbol, 'H1');
     const m15 = this.marketData.getCandles(symbol, 'M15');
