@@ -149,10 +149,6 @@ function Set-EnvValue($file, $key, $value) {
 
 # -- Telegram token
 Step 'Telegram — Bot Token'
-$currentToken = Get-EnvValue $envPath 'TELEGRAM_BOT_TOKEN'
-if ($currentToken -and $currentToken -notmatch 'your_') {
-    Write-Host "  Token actual: $currentToken" -ForegroundColor DarkGray
-}
 do {
     $newToken = Read-Host "  Bot Token (obtenlo en @BotFather)"
     $valid = $newToken -match '^\d+:[A-Za-z0-9_-]{35,}$'
@@ -163,10 +159,6 @@ OK 'TELEGRAM_BOT_TOKEN guardado'
 
 # -- Telegram chat ID
 Step 'Telegram — Chat ID'
-$currentChatId = Get-EnvValue $envPath 'TELEGRAM_CHAT_ID'
-if ($currentChatId -and $currentChatId -notmatch 'your_') {
-    Write-Host "  Chat ID actual: $currentChatId" -ForegroundColor DarkGray
-}
 do {
     $newChatId = Read-Host "  Chat ID (envía un mensaje al bot y visita api.telegram.org/bot{TOKEN}/getUpdates)"
     $valid = $newChatId -match '^-?\d+$'
@@ -180,25 +172,17 @@ Step 'License key'
 $configPath = "$REPO_DIR\config.json"
 $uuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
-$currentKey = $cfg.LICENSE_KEY
 
-if ($currentKey -and $currentKey -match $uuidPattern) {
-    Write-Host "  License key actual: $currentKey" -ForegroundColor DarkGray
-}
-
-if ($true) {
+do {
     do {
         $newKey = Read-Host "  License key (UUID)"
         $valid  = $newKey -match $uuidPattern
         if (-not $valid) { Warn "  Formato inválido — debe ser: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }
     } while (-not $valid)
 
-    $cfg.LICENSE_KEY = $newKey.ToLower()
-    $cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
-    OK "License key guardada en config.json"
-} else {
-    OK 'License key sin cambios'
-}
+$cfg.LICENSE_KEY = $newKey.ToLower()
+$cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
+OK 'License key guardada en config.json'
 
 # ── logs dir ───────────────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path "$REPO_DIR\logs" | Out-Null
