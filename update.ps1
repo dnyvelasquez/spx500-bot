@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
   Descarga la última versión, recompila y reinicia los servicios.
