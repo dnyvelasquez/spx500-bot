@@ -121,13 +121,59 @@ OK 'Dependencias Python instaladas'
 
 # ── .env ───────────────────────────────────────────────────────────────────
 Step '.env'
-if (-not (Test-Path "$REPO_DIR\.env")) {
-    Copy-Item "$REPO_DIR\.env.example" "$REPO_DIR\.env"
-    Warn '.env creado desde plantilla — EDÍTALO antes de iniciar el bot:'
-    Warn "  notepad $REPO_DIR\.env"
+$envPath = "$REPO_DIR\.env"
+if (-not (Test-Path $envPath)) {
+    Copy-Item "$REPO_DIR\.env.example" $envPath
+    OK '.env creado desde plantilla'
 } else {
     OK '.env existe'
 }
+
+# Helper: lee un valor del .env
+function Get-EnvValue($file, $key) {
+    $line = Get-Content $file | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
+    if ($line) { return $line.Split('=', 2)[1].Trim("'`"") }
+    return $null
+}
+
+# Helper: actualiza o agrega un valor en el .env
+function Set-EnvValue($file, $key, $value) {
+    $content = Get-Content $file
+    $found   = $false
+    $updated = $content | ForEach-Object {
+        if ($_ -match "^$key=") { "$key=$value"; $found = $true } else { $_ }
+    }
+    if (-not $found) { $updated += "$key=$value" }
+    $updated | Set-Content $file -Encoding utf8
+}
+
+# -- Telegram token
+Step 'Telegram — Bot Token'
+$currentToken = Get-EnvValue $envPath 'TELEGRAM_BOT_TOKEN'
+if ($currentToken -and $currentToken -notmatch 'your_') {
+    Write-Host "  Token actual: $currentToken" -ForegroundColor DarkGray
+}
+do {
+    $newToken = Read-Host "  Bot Token (obtenlo en @BotFather)"
+    $valid = $newToken -match '^\d+:[A-Za-z0-9_-]{35,}$'
+    if (-not $valid) { Warn "  Formato inválido — debe ser: 123456789:AABBccDD..." }
+} while (-not $valid)
+Set-EnvValue $envPath 'TELEGRAM_BOT_TOKEN' $newToken
+OK 'TELEGRAM_BOT_TOKEN guardado'
+
+# -- Telegram chat ID
+Step 'Telegram — Chat ID'
+$currentChatId = Get-EnvValue $envPath 'TELEGRAM_CHAT_ID'
+if ($currentChatId -and $currentChatId -notmatch 'your_') {
+    Write-Host "  Chat ID actual: $currentChatId" -ForegroundColor DarkGray
+}
+do {
+    $newChatId = Read-Host "  Chat ID (envía un mensaje al bot y visita api.telegram.org/bot{TOKEN}/getUpdates)"
+    $valid = $newChatId -match '^-?\d+$'
+    if (-not $valid) { Warn "  Formato inválido — debe ser un número (ej: 6423918192)" }
+} while (-not $valid)
+Set-EnvValue $envPath 'TELEGRAM_CHAT_ID' $newChatId
+OK 'TELEGRAM_CHAT_ID guardado'
 
 # ── license key ────────────────────────────────────────────────────────────
 Step 'License key'
