@@ -16,6 +16,7 @@ function TaskState($name) {
 
 Write-Host ''
 Write-Host '[SPX500 Bot] Iniciando servicios...' -ForegroundColor Cyan
+Write-Host '  AVISO: Asegurate de que MetaTrader 5 este abierto antes de continuar.' -ForegroundColor Yellow
 
 # Verify tasks exist
 if ((TaskState $TASK_BRIDGE) -eq 'NOT_FOUND') {

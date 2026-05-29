@@ -10,9 +10,6 @@
   Option B - fresh machine (clones and configures everything):
     irm https://raw.githubusercontent.com/dnyvelasquez/spx500-bot/main/install.ps1 | iex
 
-.NOTES
-  MT5 must be configured to start with Windows so it is available
-  when the bridge service starts.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -236,7 +233,5 @@ Write-Host ''
 Write-Host '  3. Future updates:'
 Write-Host "       $REPO_DIR\update.ps1"
 Write-Host ''
-Write-Host '  IMPORTANT: Configure MetaTrader 5 to start with Windows.' -ForegroundColor Yellow
-Write-Host '  (Tools -> Options -> General -> Start with Windows)'
-Write-Host ''
 Write-Host '  El bot NO se inicia automaticamente. Usa start.ps1 y stop.ps1.' -ForegroundColor Cyan
+Write-Host '  Asegurate de abrir MetaTrader 5 manualmente antes de ejecutar start.ps1.' -ForegroundColor Yellow

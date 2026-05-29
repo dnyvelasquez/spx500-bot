@@ -189,8 +189,7 @@ Los logs se guardan en `logs/` con rotación diaria:
 - `logs\bridge-YYYY-MM-DD.log`
 - `logs\bot-YYYY-MM-DD.log`
 
-> **MT5:** activa *Herramientas → Opciones → General → Iniciar con Windows*
-> para que el terminal esté disponible cuando el bridge levante.
+> **MT5:** abre MetaTrader 5 manualmente antes de ejecutar `start.ps1`.
 
 ## Instalación para desarrollo local
 
