@@ -76,7 +76,7 @@ function printReport(r: BacktestReport): void {
 
   console.log('\n' + SEP);
   console.log(` SPX500 Bot — Backtest │ ${r.symbol}  ${r.from} → ${r.to}`);
-  console.log(` Balance: $${r.initialBalance.toFixed(2)} → $${r.finalBalance.toFixed(2)}  │  Risk: ${r.riskPercent}%  │  Cooldown: ${r.cooldownMinutes} min`);
+  console.log(` Balance: $${r.initialBalance.toFixed(2)} → $${r.finalBalance.toFixed(2)}  │  Risk: ${r.riskPercent}%  │  Cooldown: ${r.cooldownMinutes} min  │  Spread: ${r.spreadPoints ?? 0} pts`);
   console.log(SEP);
 
   if (r.trades.length === 0) {
@@ -171,6 +171,7 @@ async function main(): Promise<void> {
   const epDiTfRaw = args['ep-di-tf'];
   const epDiTf    = (epDiTfRaw === 'H4' || epDiTfRaw === 'D1') ? epDiTfRaw : undefined;
   const epDiMinGap          = parseFloat(args['ep-di-gap'] ?? '0');
+  const spreadPoints        = parseFloat(args['spread'] ?? String(cfg['SPREAD_POINTS'] ?? 0.35));
   if (!from || !to) {
     console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
     process.exit(1);
@@ -212,6 +213,7 @@ async function main(): Promise<void> {
     epD1Align,
     epDiTf,
     epDiMinGap,
+    spreadPoints,
   });
 
   printReport(report);

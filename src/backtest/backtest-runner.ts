@@ -66,6 +66,7 @@ export interface BacktestParams {
   epD1Align?: boolean;  // skip EP signals that oppose D1 EMA8 vs EMA34 direction
   epDiTf?: 'H4' | 'D1'; // timeframe for +DI/-DI directional filter ('' = off)
   epDiMinGap?: number;  // minimum +DI/-DI gap to enforce direction (0 = any gap)
+  spreadPoints?: number; // ask-bid spread: added to BUY entry, subtracted from SELL entry
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -259,6 +260,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     ciPeriod = 14, ciMax = 0, ciBuyOnly = false,
     maxConsecLossDays = 0,
     epD1Align = false, epDiTf, epDiMinGap = 0,
+    spreadPoints = 0,
   } = params;
 
   const fetchFrom = new Date(from + 'T00:00:00');
@@ -643,15 +645,19 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     if (elapsed < cooldownSec) continue;
 
     // ── Sizing ───────────────────────────────────────────────────────────────
-    const { direction, entryPrice, stopLoss, takeProfit } = signal;
+    const { direction, entryPrice: signalEntry, stopLoss, takeProfit } = signal;
+    // R:R check and risk sizing use the M5 close price — same as the live bot,
+    // which validates R:R at close before placing the order at the ask.
     const sizing = positionSizing.calculate({
       accountBalance: balance,
       riskPercent,
-      entryPrice,
+      entryPrice: signalEntry,
       stopLoss,
       target: takeProfit,
     });
     if (sizing.riskRewardRatio < 2) continue;
+    // Actual fill price: BUY pays ask (close + spread), SELL receives bid (close − spread)
+    const entryPrice = signalEntry + (direction === 'BULLISH' ? spreadPoints : -spreadPoints);
 
     const volume = Math.min(MAX_VOLUME, Math.max(MIN_VOLUME, Math.round(sizing.positionSize * 10) / 10));
     const side = direction === 'BULLISH' ? ('BUY' as const) : ('SELL' as const);
@@ -709,6 +715,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     finalBalance: Math.round(balance * 100) / 100,
     riskPercent,
     cooldownMinutes,
+    spreadPoints,
     metrics,
     trades,
     generatedAt: new Date().toISOString(),

@@ -42,6 +42,7 @@ export interface BacktestReport {
   finalBalance: number;
   riskPercent: number;
   cooldownMinutes: number;
+  spreadPoints: number;
   metrics: BacktestMetrics;
   trades: BacktestTrade[];
   generatedAt: string;
