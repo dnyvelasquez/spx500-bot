@@ -1,4 +1,5 @@
 {
+  "MT5_PATH": "",
   "SYMBOL": "SPX500",
   "RISK_PERCENT": 1.0,
   "LIVE_TRADING": true,

@@ -509,6 +509,12 @@
 <div class="card">
   <div class="card-title">Configuración</div>
 
+  <div class="field">
+    <label for="mt5-path">Ruta al ejecutable MT5 <span style="color:var(--muted);font-weight:400">(vacío = terminal abierto por defecto)</span></label>
+    <input type="text" id="mt5-path" placeholder="C:\Program Files\MetaTrader 5 Exness\terminal64.exe" autocomplete="off" style="font-family:monospace;font-size:12px" />
+    <div style="font-size:11px;color:var(--muted);margin-top:5px">Útil cuando hay varias instalaciones de MT5. Cada instancia del bot apunta a su propio terminal.</div>
+  </div>
+
   <div class="fields-row">
     <div class="field">
       <label for="symbol">Símbolo (MT5)</label>
@@ -883,6 +889,7 @@
   }
 
   function applyToForm(cfg) {
+    $('mt5-path').value     = cfg.MT5_PATH ?? '';
     $('symbol').value       = cfg.SYMBOL ?? 'SPX500';
     $('risk').value         = cfg.RISK_PERCENT ?? 1;
     $('cooldown').value     = cfg.SIGNAL_COOLDOWN_MINUTES ?? 30;
@@ -918,6 +925,7 @@ $('max-daily-trades').value    = cfg.MAX_DAILY_TRADES ?? 0;
   // ── Save ──────────────────────────────────────────────────────────────────
   $('btn-save').addEventListener('click', async () => {
     const payload = {
+      MT5_PATH:                    $('mt5-path').value.trim(),
       SYMBOL:                      $('symbol').value.trim().toUpperCase(),
       RISK_PERCENT:                parseFloat($('risk').value),
       LIVE_TRADING:                $('live-trading').checked,

@@ -1,6 +1,10 @@
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import MetaTrader5 as mt5
+
+_CONFIG_PATH = (Path(__file__).parent / ".." / ".." / ".." / ".." / "config.json").resolve()
 
 TIMEFRAMES = {
     "M1": mt5.TIMEFRAME_M1,
@@ -12,15 +16,22 @@ TIMEFRAMES = {
 }
 
 
+def _get_mt5_path() -> str:
+    try:
+        cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        return cfg.get("MT5_PATH", "")
+    except Exception:
+        return ""
+
+
 class MT5Client:
 
     @staticmethod
     def connect():
-
-        if mt5.initialize():
-            return True
-
-        return False
+        path = _get_mt5_path()
+        if path:
+            return bool(mt5.initialize(path=path))
+        return bool(mt5.initialize())
 
     @staticmethod
     def shutdown():

@@ -57,6 +57,7 @@ class BlockedWindow(BaseModel):
 
 
 class BotSettings(BaseModel):
+    MT5_PATH: str = Field(default="")
     SYMBOL: str = Field(default="SPX500")
     RISK_PERCENT: float = Field(default=1.0, ge=0.1, le=10.0)
     LIVE_TRADING: bool = Field(default=False)
