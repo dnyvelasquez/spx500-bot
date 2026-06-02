@@ -29,9 +29,12 @@ class MT5Client:
     @staticmethod
     def connect():
         path = _get_mt5_path()
-        if path:
-            return bool(mt5.initialize(path=path))
-        return bool(mt5.initialize())
+        try:
+            if path:
+                return bool(mt5.initialize(path=path))
+            return bool(mt5.initialize())
+        except Exception:
+            return False
 
     @staticmethod
     def shutdown():
