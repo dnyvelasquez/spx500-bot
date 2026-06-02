@@ -1,5 +1,5 @@
 {
-  "MT5_PATH": "",
+  "MT5_PATH": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
   "SYMBOL": "SPX500",
   "RISK_PERCENT": 1.0,
   "LIVE_TRADING": true,
