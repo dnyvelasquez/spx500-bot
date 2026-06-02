@@ -26,6 +26,9 @@ const envSchema = z.object({
   // Chat ID de Telegram donde enviar notificaciones (opcional)
   TELEGRAM_CHAT_ID: z.string().optional(),
 
+  // URL base del bridge MT5 (sin trailing slash, sin /api/trading)
+  MT5_BRIDGE_URL: z.string().url().default('http://127.0.0.1:8000'),
+
   // Neon (PostgreSQL) — validación de licencia (opcional en desarrollo)
   DATABASE_URL: z.string().url().optional(),
   LICENSE_KEY: z.string().uuid().optional(),

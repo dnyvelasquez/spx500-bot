@@ -31,6 +31,8 @@ export class MarketDataService {
         count
       );
 
+    if (!response.success || !response.data) return;
+
     const key =
       `${symbol}_${timeframe}`;
 
@@ -56,9 +58,7 @@ export class MarketDataService {
   ) {
 
     if (
-      !oldCandles ||
       oldCandles.length === 0 ||
-      !newCandles ||
       newCandles.length === 0
     ) {
       return;

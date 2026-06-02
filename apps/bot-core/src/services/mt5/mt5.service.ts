@@ -1,5 +1,7 @@
 import axios from "axios";
 
+import { env } from "@config/env";
+
 import {
   TickResponse,
   CandlesResponse,
@@ -13,7 +15,7 @@ import {
 export class MT5Service {
 
   private readonly baseUrl =
-    "http://127.0.0.1:8000/api/trading";
+    `${env.MT5_BRIDGE_URL}/api/trading`;
 
   async getTick(
     symbol: string
