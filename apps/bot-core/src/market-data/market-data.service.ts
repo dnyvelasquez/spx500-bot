@@ -56,7 +56,9 @@ export class MarketDataService {
   ) {
 
     if (
+      !oldCandles ||
       oldCandles.length === 0 ||
+      !newCandles ||
       newCandles.length === 0
     ) {
       return;
