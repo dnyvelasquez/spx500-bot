@@ -73,7 +73,7 @@ export class Application {
   private readonly dailyTradeCountGuard = new DailyTradeCountGuard();
   private readonly consecLossGuard = new ConsecLossGuard();
   private readonly sessionGuard = new SessionGuard();
-  private readonly journal = new TradeJournalService();
+  private readonly journal = new TradeJournalService('SPX500 Bot');
   private readonly statusService = new BotStatusService();
   private pollTimer: NodeJS.Timeout | null = null;
   private readonly lastSignalTime = new Map<'BULLISH' | 'BEARISH', number>();
