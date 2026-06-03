@@ -440,6 +440,22 @@ Cada operación ejecutada en modo live se registra automáticamente en la tabla 
 
 Las estadísticas (win rate, profit factor, avg R:R, P&L total, racha máxima y actual de pérdidas consecutivas) se visualizan en tiempo real en el dashboard bajo la sección **Journal**, con actualización automática cada 30 segundos.
 
+Adicionalmente, al cerrar cada operación se inserta un registro en la tabla `trade_results` de Neon con los datos de reporting:
+
+| Campo | Descripción |
+|---|---|
+| `owner_name` | Nombre del titular (desde `license-cache.json`) |
+| `account_type` | `DEMO` o `REAL` |
+| `mt5_account` | Número de cuenta MT5 |
+| `bot_name` | `SPX500 Bot` |
+| `symbol` | Activo operado |
+| `profit_usd` | P&L en USD |
+| `direction` | `LONG` o `SHORT` |
+| `closed_at` | Timestamp UTC |
+| `closed_at_et` | Fecha y hora de cierre en formato `YYYY-MM-DD HH:MM:SS` hora ET |
+
+Estos datos se consultan desde **[bot-reports](https://bot-reports.vercel.app)** — dashboard centralizado con filtros por titular, cuenta, bot, activo y período (día/mes/año).
+
 ## Modo semi-automático
 
 Cuando `SEMI_AUTO_MODE=true` y `LIVE_TRADING=true`, el bot detecta el setup completo (todas las condiciones ICT) y en lugar de ejecutar automáticamente envía por Telegram un mensaje con los niveles del trade y dos botones:
@@ -493,4 +509,5 @@ npm test
 | `LICENSE_KEY` | UUID de licencia (también editable en dashboard) | — |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram | — |
 | `TELEGRAM_CHAT_ID` | Chat ID para notificaciones | — |
-| `DATABASE_URL` | Conexión Neon PostgreSQL para validación de licencias | — |
+| `MT5_BRIDGE_URL` | URL base del bridge MT5 (sin `/api/trading`) | `http://127.0.0.1:8000` |
+| `DATABASE_URL` | Conexión Neon PostgreSQL para validación de licencias y journal | — |
