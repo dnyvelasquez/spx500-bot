@@ -40,8 +40,16 @@ interface BotConfig {
   EP_MAX_HOUR?: number;
   EP_ADX_PERIOD?: number;
   EP_ADX_MIN?: number;
+  EP_ADX_MAX?: number;
   EP_H4_ALIGN?: boolean;
   MAX_CONSEC_LOSS_DAYS?: number;
+  SMA_TREND_PERIOD?: number;
+  SMA_TREND_TF?: 'D1' | 'H4' | 'H1';
+  ENABLE_SMAX?: boolean;
+  SMAX_FAST_PERIOD?: number;
+  SMAX_SLOW_PERIOD?: number;
+  SMAX_TF?: 'H1' | 'H4';
+  SMAX_LOOKBACK?: number;
 }
 
 const CONFIG_PATH = path.resolve(__dirname, '..', '..', 'config.json');
@@ -78,8 +86,16 @@ class ConfigService {
   get epMaxHour(): number    { return this.config.EP_MAX_HOUR   ?? 0;  }
   get epAdxPeriod(): number  { return this.config.EP_ADX_PERIOD ?? 14;    }
   get epAdxMin(): number     { return this.config.EP_ADX_MIN    ?? 0;     }
+  get epAdxMax(): number     { return this.config.EP_ADX_MAX    ?? 0;     }
   get epH4Align(): boolean   { return this.config.EP_H4_ALIGN   ?? false; }
   get maxConsecLossDays(): number { return this.config.MAX_CONSEC_LOSS_DAYS ?? 0; }
+  get smaTrendPeriod(): number { return this.config.SMA_TREND_PERIOD ?? 0; }
+  get smaTrendTf(): 'D1' | 'H4' | 'H1' { return this.config.SMA_TREND_TF ?? 'D1'; }
+  get enableSmax(): boolean { return this.config.ENABLE_SMAX ?? false; }
+  get smaxFastPeriod(): number { return this.config.SMAX_FAST_PERIOD ?? 20; }
+  get smaxSlowPeriod(): number { return this.config.SMAX_SLOW_PERIOD ?? 50; }
+  get smaxTf(): 'H1' | 'H4' { return this.config.SMAX_TF ?? 'H1'; }
+  get smaxLookback(): number { return this.config.SMAX_LOOKBACK ?? 5; }
 
   // LICENSE_KEY: config.json tiene prioridad sobre .env
   get licenseKey(): string | undefined {

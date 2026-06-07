@@ -13,6 +13,7 @@ import { EMAEngine } from '@bot-core/strategy/indicators/ema-engine';
 import { MACDEngine } from '@bot-core/strategy/indicators/macd-engine';
 import { ADXEngine } from '@bot-core/strategy/indicators/adx-engine';
 import { ChoppinessEngine } from '@bot-core/strategy/indicators/choppiness-engine';
+import { SMAEngine } from '@bot-core/strategy/indicators/sma-engine';
 import type { Candle } from '@bot-core/services/mt5/mt5.types';
 
 import type { BacktestTrade, BacktestReport, BacktestMetrics, TradeResult, SignalType } from './backtest.types';
@@ -57,6 +58,7 @@ export interface BacktestParams {
   epMaxHour?: number;
   epAdxPeriod?: number;
   epAdxMin?: number;
+  epAdxMax?: number;
   epH1AdxMin?: number;
   epH4Align?: boolean;
   ciPeriod?: number;
@@ -67,6 +69,18 @@ export interface BacktestParams {
   epDiTf?: 'H4' | 'D1'; // timeframe for +DI/-DI directional filter ('' = off)
   epDiMinGap?: number;  // minimum +DI/-DI gap to enforce direction (0 = any gap)
   spreadPoints?: number; // ask-bid spread: added to BUY entry, subtracted from SELL entry
+  // SMA trend filter — gates all signals; 0 = off
+  smaTrendPeriod?: number;         // SMA period (e.g. 200); 0 = disabled
+  smaTrendTf?: 'D1' | 'H4' | 'H1';
+  // SMA crossover signal
+  enableSMAX?: boolean;
+  smaxFastPeriod?: number;         // fast SMA period (e.g. 20)
+  smaxSlowPeriod?: number;         // slow SMA period (e.g. 50)
+  smaxTf?: 'H1' | 'H4';
+  smaxLookback?: number;           // TF candles back to search for a recent cross (default 5)
+  // SMA Bounce signal — pullback to slow SMA on chosen TF
+  enableSMAB?: boolean;
+  smabTf?: 'H1' | 'H4';
 }
 
 // ── Bridge fetch ──────────────────────────────────────────────────────────────
@@ -256,11 +270,14 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     beAtPoints, beBuffer, partialTpEnabled,
     enableZB = true, enableEP = true,
     epMinSlPoints = 0, epSkipMonday = false, epMinHour = 0, epMaxHour = 0,
-    epAdxPeriod = 14, epAdxMin = 0, epH1AdxMin = 0, epH4Align = false,
+    epAdxPeriod = 14, epAdxMin = 0, epAdxMax = 0, epH1AdxMin = 0, epH4Align = false,
     ciPeriod = 14, ciMax = 0, ciBuyOnly = false,
     maxConsecLossDays = 0,
     epD1Align = false, epDiTf, epDiMinGap = 0,
     spreadPoints = 0,
+    smaTrendPeriod = 0, smaTrendTf = 'D1',
+    enableSMAX = false, smaxFastPeriod = 20, smaxSlowPeriod = 50, smaxTf = 'H1', smaxLookback = 5,
+    enableSMAB = false, smabTf = 'H1',
   } = params;
 
   const fetchFrom = new Date(from + 'T00:00:00');
@@ -308,6 +325,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
   const macdEngine = new MACDEngine();
   const adxEngine = new ADXEngine();
   const choppinessEngine = new ChoppinessEngine();
+  const smaEngine = new SMAEngine();
 
   // ── Signal evaluators ────────────────────────────────────────────────────────
 
@@ -486,10 +504,11 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
     const currentPrice = m5All[i]!.close;
     if (Math.abs(currentPrice - m15Ema34) > zoneProximityPoints) return null;
 
-    // ADX on H4: skip if market is ranging (trend strength too low)
-    if (epAdxMin > 0) {
+    // ADX on H4: skip if trend is too weak or overextended
+    if (epAdxMin > 0 || epAdxMax > 0) {
       const adx = adxEngine.last(h4, epAdxPeriod);
-      if (adx === null || adx < epAdxMin) return null;
+      if (epAdxMin > 0 && (adx === null || adx < epAdxMin)) return null;
+      if (epAdxMax > 0 && adx !== null && adx > epAdxMax) return null;
     }
 
     // ADX on H1: skip if H1 trend lacks conviction
@@ -528,6 +547,136 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
       entryPrice,
       stopLoss,
       takeProfit: direction === 'BULLISH' ? entryPrice + slDist * 2 : entryPrice - slDist * 2,
+    };
+  }
+
+  function evalSMACrossover(
+    h1: Candle[], h4: Candle[], m5All: Candle[], i: number,
+  ): SignalCandidate | null {
+    if (!enableSMAX) return null;
+
+    const tfCandles = smaxTf === 'H4' ? h4 : h1;
+    if (tfCandles.length < smaxSlowPeriod + smaxLookback) return null;
+
+    // Find most recent fast/slow cross within the lookback window
+    let crossDir: 'BULLISH' | 'BEARISH' | null = null;
+    const len = tfCandles.length;
+
+    for (let k = 1; k <= smaxLookback && crossDir === null; k++) {
+      const currSlice = tfCandles.slice(0, len - k + 1);
+      const prevSlice = tfCandles.slice(0, len - k);
+      if (prevSlice.length < smaxSlowPeriod) break;
+
+      const fast     = smaEngine.last(currSlice, smaxFastPeriod);
+      const slow     = smaEngine.last(currSlice, smaxSlowPeriod);
+      const fastPrev = smaEngine.last(prevSlice, smaxFastPeriod);
+      const slowPrev = smaEngine.last(prevSlice, smaxSlowPeriod);
+      if (fast === null || slow === null || fastPrev === null || slowPrev === null) continue;
+
+      if (fastPrev <= slowPrev && fast > slow) crossDir = 'BULLISH';
+      else if (fastPrev >= slowPrev && fast < slow) crossDir = 'BEARISH';
+    }
+
+    if (!crossDir) return null;
+
+    // Cross direction must still be in force at the current candle
+    const fastNow = smaEngine.last(tfCandles, smaxFastPeriod);
+    const slowNow = smaEngine.last(tfCandles, smaxSlowPeriod);
+    if (fastNow === null || slowNow === null) return null;
+    if (crossDir === 'BULLISH' && fastNow <= slowNow) return null;
+    if (crossDir === 'BEARISH' && fastNow >= slowNow) return null;
+
+    // Price must have pulled back near the fast SMA
+    const currentPrice = m5All[i]!.close;
+    if (Math.abs(currentPrice - fastNow) > zoneProximityPoints) return null;
+
+    // SL beyond slow SMA
+    const stopLoss = crossDir === 'BULLISH'
+      ? slowNow - zoneSlBufferPoints
+      : slowNow + zoneSlBufferPoints;
+    const slDist = Math.abs(currentPrice - stopLoss);
+    if (minSlPoints > 0 && slDist < minSlPoints) return null;
+
+    // Entry precision: require FVG or displacement at M5
+    const fvgWindow = m5All.slice(Math.max(0, i - 6), i + 1);
+    let fvg = null;
+    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
+      const slice = fvgWindow.slice(k - 2, k + 1);
+      fvg = crossDir === 'BULLISH' ? fvgDetector.detectBullish(slice) : fvgDetector.detectBearish(slice);
+    }
+    if (fvg && minFvgPoints > 0 && fvg.size < minFvgPoints) fvg = null;
+
+    const dispWindow = m5All.slice(Math.max(0, i - 4), i + 1);
+    const displacement = dispWindow.map(c => displacementDetector.detect(c)).find(Boolean) ?? null;
+
+    if (!fvg && !displacement) return null;
+
+    return {
+      signalType: 'SMA_X',
+      direction: crossDir,
+      entryPrice: currentPrice,
+      stopLoss,
+      takeProfit: crossDir === 'BULLISH' ? currentPrice + slDist * 2 : currentPrice - slDist * 2,
+    };
+  }
+
+  function evalSMABounce(
+    h1: Candle[], h4: Candle[], m15: Candle[], m5All: Candle[], i: number,
+  ): SignalCandidate | null {
+    if (!enableSMAB) return null;
+
+    const tfCandles = smabTf === 'H4' ? h4 : h1;
+    if (tfCandles.length < smaxSlowPeriod + 1 || m15.length < 26 || m5All.length < 1) return null;
+
+    const fastSma = smaEngine.last(tfCandles, smaxFastPeriod);
+    const slowSma = smaEngine.last(tfCandles, smaxSlowPeriod);
+    if (fastSma === null || slowSma === null) return null;
+
+    const direction: 'BULLISH' | 'BEARISH' = fastSma > slowSma ? 'BULLISH' : 'BEARISH';
+
+    // Spread filter: avoid choppy / sideways market
+    if (emaSpreadMin > 0 && Math.abs(fastSma - slowSma) < emaSpreadMin) return null;
+
+    // Price must be approaching from the trend side (not broken through)
+    // BULLISH: price above slowSma (pullback touches from above)
+    // BEARISH: price below slowSma (pullback touches from below)
+    const currentPrice = m5All[i]!.close;
+    if (direction === 'BULLISH' && currentPrice < slowSma) return null;
+    if (direction === 'BEARISH' && currentPrice > slowSma) return null;
+    if (Math.abs(currentPrice - slowSma) > zoneProximityPoints) return null;
+
+    // MACD on M15 must confirm direction
+    const macd = macdEngine.analyze(m15);
+    if (!macd) return null;
+    if (direction === 'BULLISH' && macd.histogram <= 0) return null;
+    if (direction === 'BEARISH' && macd.histogram >= 0) return null;
+
+    // Entry precision: FVG or displacement at M5
+    const fvgWindow = m5All.slice(Math.max(0, i - 6), i + 1);
+    let fvg = null;
+    for (let k = fvgWindow.length - 1; k >= 2 && !fvg; k--) {
+      const slice = fvgWindow.slice(k - 2, k + 1);
+      fvg = direction === 'BULLISH' ? fvgDetector.detectBullish(slice) : fvgDetector.detectBearish(slice);
+    }
+    if (fvg && minFvgPoints > 0 && fvg.size < minFvgPoints) fvg = null;
+
+    const dispWindow = m5All.slice(Math.max(0, i - 4), i + 1);
+    const displacement = dispWindow.map(c => displacementDetector.detect(c)).find(Boolean) ?? null;
+
+    if (!fvg && !displacement) return null;
+
+    const stopLoss = direction === 'BULLISH'
+      ? slowSma - zoneSlBufferPoints
+      : slowSma + zoneSlBufferPoints;
+    const slDist = Math.abs(currentPrice - stopLoss);
+    if (minSlPoints > 0 && slDist < minSlPoints) return null;
+
+    return {
+      signalType: 'SMA_B',
+      direction,
+      entryPrice: currentPrice,
+      stopLoss,
+      takeProfit: direction === 'BULLISH' ? currentPrice + slDist * 2 : currentPrice - slDist * 2,
     };
   }
 
@@ -609,12 +758,25 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
       if (ci !== null && ci > ciMax) ciChoppy = true;
     }
 
-    // ── Evaluar señal: ZB primero, EMA Pullback como fallback ────────────────
+    // ── Evaluar señal: ZB → EP → SMA_X ─────────────────────────────────────
     const signal =
       (enableZB ? evalZoneBounce(d1Window, h4Window, h1Window, m15Window, m5Candles, i) : null) ??
-      (enableEP ? evalEMAPullback(h4Window, h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope, candle.time) : null);
+      (enableEP ? evalEMAPullback(h4Window, h1Window, m15Window, m5Candles, i, epUseM15Align, epUseMacdSlope, candle.time) : null) ??
+      evalSMACrossover(h1Window, h4Window, m5Candles, i) ??
+      evalSMABounce(h1Window, h4Window, m15Window, m5Candles, i);
 
     if (!signal) continue;
+
+    // ── SMA trend filter: gate all signals by price vs SMA ──────────────────
+    if (smaTrendPeriod > 0) {
+      const smaTfC = smaTrendTf === 'D1' ? d1Window : smaTrendTf === 'H4' ? h4Window : h1Window;
+      const sma = smaEngine.last(smaTfC, smaTrendPeriod);
+      if (sma !== null) {
+        const price = m5Candles[i]!.close;
+        if (signal.direction === 'BULLISH' && price < sma) continue;
+        if (signal.direction === 'BEARISH' && price > sma) continue;
+      }
+    }
 
     // Skip signal based on CI regime: all signals, or only BUY
     if (ciChoppy && (!ciBuyOnly || signal.direction === 'BULLISH')) continue;

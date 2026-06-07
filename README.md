@@ -49,7 +49,7 @@ Bot de trading algorítmico para el S&P 500 basado en conceptos ICT / Smart Mone
 
 ## Lógica de entrada
 
-El bot evalúa dos tipos de señal en cada ciclo. La señal **Zone Bounce (ZB)** tiene prioridad; si no se cumple, intenta la señal **EMA Pullback (EP)** como fallback. Solo se ejecuta una señal por ciclo.
+El bot evalúa tres tipos de señal en cada ciclo en orden de prioridad: **Zone Bounce (ZB)** → **EMA Pullback (EP)** → **SMA Crossover (SX)**. Solo se ejecuta la primera que cumple todas las condiciones. Todas las señales pasan además por el **filtro de tendencia SMA** antes de ejecutarse.
 
 ### [ZB] Zone Bounce — rebote en zona HTF (4 capas top-down)
 
@@ -70,6 +70,24 @@ El bot evalúa dos tipos de señal en cada ciclo. La señal **Zone Bounce (ZB)**
 3. **Precio cerca de EMA34 en M15** — el precio actual debe estar dentro de `ZONE_PROXIMITY_POINTS` puntos de la EMA34 en M15 (zona dinámica de soporte/resistencia).
 
 4. **MACD confirma momentum** — el histograma MACD (EMA12-EMA26, signal 9) en M15 debe estar en la dirección del trade (>0 para BULLISH, <0 para BEARISH). El SL va más allá de la EMA34 en M15 (`ZONE_SL_BUFFER_POINTS`) y el TP garantiza mínimo 2:1 R:R.
+
+### [SX] SMA Crossover — cruce de medias simples con pullback
+
+1. **Cruce reciente fast/slow SMA** — se detecta si la SMA rápida (default SMA20) cruzó la SMA lenta (default SMA50) en el timeframe configurado (default H1) dentro de los últimos `SMAX_LOOKBACK` (default 5) candles. Cruce alcista → BULLISH, bajista → BEARISH.
+
+2. **Dirección vigente** — la SMA20 debe seguir por encima (BULLISH) o por debajo (BEARISH) de la SMA50 en el momento de la señal.
+
+3. **Pullback a la SMA20** — el precio actual debe estar dentro de `ZONE_PROXIMITY_POINTS` puntos de la SMA20 (zona dinámica de retorno tras el cruce).
+
+4. **Entrada M5 (FVG o desplazamiento)** — se requiere al menos un FVG o una vela de desplazamiento en M5 para precisar la entrada. El SL va más allá de la SMA50 ± `ZONE_SL_BUFFER_POINTS` y el TP garantiza mínimo 2:1 R:R.
+
+### Filtro de tendencia SMA
+
+Actúa como gate global sobre **todas** las señales (ZB, EP, SX). Si `SMA_TREND_PERIOD > 0`:
+- Precio > SMA → solo se aceptan señales BULLISH.
+- Precio < SMA → solo se aceptan señales BEARISH.
+
+Configuración por defecto: SMA200 en D1.
 
 ## Filtros de riesgo
 
@@ -316,7 +334,7 @@ El backtest imprime en consola un resumen por trade y las métricas finales:
  Max drawdown:          3.94%
 ```
 
-La columna `Tipo` indica el origen de la señal: `[ZB]` = Zone Bounce (rebote en zona HTF), `[EP]` = EMA Pullback (pullback a EMA34 dinámica), `[BP]` = Breakout Pullback (pullback a zona rota).
+La columna `Tipo` indica el origen de la señal: `[ZB]` = Zone Bounce (rebote en zona HTF), `[EP]` = EMA Pullback (pullback a EMA34 dinámica), `[SX]` = SMA Crossover (pullback a SMA20 tras cruce SMA20/50), `[BP]` = Breakout Pullback (pullback a zona rota).
 
 Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backtest-SPX500-2025-01-01-2025-05-01.json`.
 
@@ -334,6 +352,22 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | Partial TPs | Simulados cuando `PARTIAL_TP_ENABLED=true` — cierra 50% al trigger y continúa con el 50% restante |
 | Break-even | Simulado cuando `BE_AT_POINTS > 0` — mueve SL a entry + `BE_BUFFER_POINTS` al alcanzar el trigger |
 | Warm-up | 5 días previos a `--from` + 100 velas M5 para que D1/H4/H1/M15 tengan suficiente historia |
+
+### Resultados de referencia (con config actual)
+
+Backtest con la configuración en vivo: riesgo 1%, spread 0.35 pts, EP_ADX_MIN=25, ENABLE_SMAX=true, SMA200 D1.
+
+| Período | Trades | WR | PF | P&L | MaxDD | Racha máx |
+|---|---|---|---|---|---|---|
+| Ene–Dic 2025 (11m) | 74 | 48.3% | 1.79 | +$2,594 | 3.94% | 4 |
+| Ene–Jun 2026 (5m) | 41 | 53.9% | 2.18 | +$2,425 | 3.94% | 4 |
+
+Desglose por señal (2025):
+- **[ZB] Zone Bounce:** WR 47.6%, P&L +$867
+- **[EP] EMA Pullback:** WR 38.1%, P&L +$295 (solo cuando ADX H4 ≥ 25)
+- **[SX] SMA Crossover:** WR 62.5%, P&L +$1,432
+
+> **Nota:** El filtro EP_ADX_MIN=25 es el cambio más impactante en la estrategia SPX500. Sin él, el MaxDD en 2025 era 13.13% con racha de 14 pérdidas consecutivas. La señal [EP] en SPX500 solo es fiable cuando la tendencia H4 tiene suficiente fuerza (ADX>25) — en mercados choppy o de baja ADX el pullback tiende a continuar en contra.
 
 ## Endpoints del bridge
 
@@ -387,7 +421,10 @@ Adicionalmente escribe un archivo JSON completo en la raíz del proyecto: `backt
 | **Confirmación M15 [EP]** | `EP_M15_ALIGN` | Para señal [EP]: exige que EMA8 en M15 esté al mismo lado de EMA34 (pullback superficial). Default `true`. |
 | **Hora mínima [EP]** | `EP_MIN_HOUR` | Para señal [EP]: descarta señales antes de esta hora ET (ej. `10` bloquea 9:xx). `0` = desactivado. Default `10`. |
 | **Hora máxima [EP]** | `EP_MAX_HOUR` | Para señal [EP]: descarta señales a partir de esta hora ET (ej. `13` bloquea 13:xx en adelante). `0` = desactivado. Default `0`. |
-| **ADX mínimo [EP]** | `EP_ADX_MIN` | Para señal [EP]: descarta señales cuando el ADX en H4 es menor a este valor (mercado en rango). `0` = desactivado. Default `0`. Periodo configurable con `EP_ADX_PERIOD` (default 14). |
+| **ADX mínimo [EP]** | `EP_ADX_MIN` | Para señal [EP]: descarta señales cuando el ADX en H4 es menor a este valor (mercado en rango, sin tendencia definida). `0` = desactivado. Default `25`. Periodo configurable con `EP_ADX_PERIOD` (default 14). |
+| **ADX máximo [EP]** | `EP_ADX_MAX` | Para señal [EP]: descarta señales cuando el ADX en H4 supera este valor (tendencia sobreextendida, alta probabilidad de reversión). `0` = desactivado. Default `0`. |
+| **Filtro tendencia SMA** | `SMA_TREND_PERIOD` | Gate global: si el precio está por debajo/encima de la SMA del TF configurado, se descartan señales en la dirección contraria. `0` = desactivado. Default `200` (SMA200 D1). TF configurable con `SMA_TREND_TF` (`D1`/`H4`/`H1`, default `D1`). |
+| **SMA Crossover [SX]** | `ENABLE_SMAX` | Activa la señal de cruce SMA20/50 en H1. `true` = activado. Default `true`. Periodos: `SMAX_FAST_PERIOD` (default 20), `SMAX_SLOW_PERIOD` (default 50). TF: `SMAX_TF` (`H1`/`H4`, default `H1`). Ventana de detección: `SMAX_LOOKBACK` candles (default 5). |
 
 ## Gestión de posiciones
 
@@ -499,12 +536,20 @@ npm test
 | `EP_MIN_HOUR` | Hora ET mínima para señal [EP] (`0` = desactivado) | `10` |
 | `EP_MAX_HOUR` | Hora ET máxima (exclusiva) para señal [EP] (`0` = desactivado) | `13` |
 | `EP_ADX_PERIOD` | Periodo para cálculo ADX en H4 para señal [EP] | `14` |
-| `EP_ADX_MIN` | ADX H4 mínimo para señal [EP] (`0` = desactivado) | `0` |
+| `EP_ADX_MIN` | ADX H4 mínimo para señal [EP] (`0` = desactivado) | `25` |
+| `EP_ADX_MAX` | ADX H4 máximo para señal [EP] (`0` = desactivado) | `0` |
 | `MAX_CONSEC_LOSSES` | Pérdidas consecutivas antes de pausar el resto del día (`0` = desactivado) | `0` |
 | `BE_AT_POINTS` | Puntos a favor para activar break-even/partial TP (`0` = desactivado) | `0` |
 | `BE_BUFFER_POINTS` | Puntos sobre entry al mover SL a BE | `0.25` |
 | `PARTIAL_TP_ENABLED` | `true` para cerrar 50% al trigger de BE y dejar correr el resto (requiere `BE_AT_POINTS > 0`) | `false` |
 | `SEMI_AUTO_MODE` | `true` para enviar alerta de Telegram con botones antes de ejecutar (requiere reinicio) | `false` |
+| `SMA_TREND_PERIOD` | Período del filtro de tendencia SMA global (`0` = desactivado) | `200` |
+| `SMA_TREND_TF` | Timeframe del filtro SMA (`D1`, `H4`, `H1`) | `D1` |
+| `ENABLE_SMAX` | `true` para activar la señal SMA Crossover [SX] | `true` |
+| `SMAX_FAST_PERIOD` | Período de la SMA rápida para señal [SX] | `20` |
+| `SMAX_SLOW_PERIOD` | Período de la SMA lenta para señal [SX] | `50` |
+| `SMAX_TF` | Timeframe del cruce SMA (`H1`, `H4`) | `H1` |
+| `SMAX_LOOKBACK` | Candles del TF hacia atrás para detectar el cruce | `5` |
 | `TELEGRAM_ENABLED` | `false` para silenciar notificaciones | `true` |
 | `LICENSE_KEY` | UUID de licencia (también editable en dashboard) | — |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram | — |

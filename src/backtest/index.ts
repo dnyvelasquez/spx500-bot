@@ -10,11 +10,19 @@ function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i]?.startsWith('--') && argv[i + 1] && !argv[i + 1]!.startsWith('--')) {
-      out[argv[i]!.slice(2)] = argv[i + 1]!;
+    const arg = argv[i]!;
+    if (arg.startsWith('--') && argv[i + 1] && !argv[i + 1]!.startsWith('--')) {
+      out[arg.slice(2)] = argv[i + 1]!;
       i++;
-    } else if (argv[i] && !argv[i]!.startsWith('--')) {
-      positional.push(argv[i]!);
+    } else if (arg.startsWith('--')) {
+      // standalone flag with no value (skip)
+    } else if (arg.includes('=')) {
+      // key=value form: npm@10+ strips --flag but passes value as positional;
+      // use "key=value" (no dashes) to bypass npm flag parsing entirely.
+      const eqIdx = arg.indexOf('=');
+      out[arg.slice(0, eqIdx)] = arg.slice(eqIdx + 1);
+    } else {
+      positional.push(arg);
     }
   }
   // npm@10+ strips --start/--end as unknown config flags but passes values as positionals
@@ -55,7 +63,7 @@ function tradeRow(t: BacktestTrade): string {
   const icon = t.result === 'WIN' ? '✓' : t.result === 'LOSS' ? '✗' : '○';
   const pnl = (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2);
   const rr = t.actualRr !== null ? t.actualRr.toFixed(2) : 'n/a';
-  const tag = t.signalType === 'BREAKOUT' ? '[BP]' : t.signalType === 'EMA_PB' ? '[EP]' : '[ZB]';
+  const tag = t.signalType === 'BREAKOUT' ? '[BP]' : t.signalType === 'EMA_PB' ? '[EP]' : t.signalType === 'SMA_X' ? '[SX]' : t.signalType === 'SMA_B' ? '[SB]' : '[ZB]';
   return [
     pad(t.tradeNumber, 3, true),
     pad(t.openTimeISO, 17),
@@ -104,6 +112,8 @@ function printReport(r: BacktestReport): void {
   const zb = r.trades.filter(t => t.signalType === 'ZONE');
   const bp = r.trades.filter(t => t.signalType === 'BREAKOUT');
   const ep = r.trades.filter(t => t.signalType === 'EMA_PB');
+  const sx = r.trades.filter(t => t.signalType === 'SMA_X');
+  const sb = r.trades.filter(t => t.signalType === 'SMA_B');
   const statLine = (label: string, ts: BacktestTrade[]) => {
     const w = ts.filter(t => t.result === 'WIN').length;
     const l = ts.filter(t => t.result === 'LOSS').length;
@@ -119,6 +129,8 @@ function printReport(r: BacktestReport): void {
   console.log(statLine('[ZB] Zone Bounce:    ', zb));
   console.log(statLine('[EP] EMA Pullback:   ', ep));
   console.log(statLine('[BP] Breakout+PB:    ', bp));
+  console.log(statLine('[SX] SMA Crossover:  ', sx));
+  console.log(statLine('[SB] SMA Bounce:     ', sb));
   console.log(sep);
   console.log(` Total trades:          ${m.totalTrades}`);
   console.log(` Wins / Losses / Open:  ${m.wins} / ${m.losses} / ${m.openTrades}`);
@@ -153,7 +165,7 @@ async function main(): Promise<void> {
   const beAtRaw      = parseFloat(args['be-at-points'] ?? String(cfg['BE_AT_POINTS'] ?? 0));
   const beAtPoints   = beMode === '1r' ? -1 : beAtRaw;
   const partialTp    = (args['partial-tp'] ?? String(cfg['PARTIAL_TP_ENABLED'] ?? 'false')) === 'true';
-  const enableZB         = (args['zb'] ?? 'true') !== 'false';
+  const enableZB         = (args['zb'] ?? String(cfg['ZB_ENABLED'] ?? 'true')) !== 'false';
   const enableEP         = (args['ep'] ?? 'true') !== 'false';
   const epMinSlPoints    = parseFloat(args['ep-min-sl'] ?? String(cfg['EP_MIN_SL_POINTS'] ?? 0));
   const epSkipMonday     = (args['ep-skip-monday'] ?? String(cfg['EP_SKIP_MONDAY'] ?? 'false')) === 'true';
@@ -161,10 +173,11 @@ async function main(): Promise<void> {
   const epMaxHour        = parseInt(args['ep-max-hour']   ?? String(cfg['EP_MAX_HOUR']   ?? 0),  10);
   const epAdxPeriod      = parseInt(args['ep-adx-period'] ?? String(cfg['EP_ADX_PERIOD'] ?? 14), 10);
   const epAdxMin         = parseFloat(args['ep-adx-min']    ?? String(cfg['EP_ADX_MIN']    ?? 0));
+  const epAdxMax         = parseFloat(args['ep-adx-max']    ?? String(cfg['EP_ADX_MAX']    ?? 0));
   const epH1AdxMin       = parseFloat(args['ep-h1-adx-min'] ?? '0');
   const epH4Align        = (args['ep-h4-align']             ?? String(cfg['EP_H4_ALIGN']   ?? 'false')) === 'true';
   const ciPeriod         = parseInt(args['ci-period']  ?? '14', 10);
-  const ciMax            = parseFloat(args['ci-max']   ?? '0');
+  const ciMax            = parseFloat(args['ci-max']       ?? String(cfg['CI_MAX']        ?? 0));
   const ciBuyOnly        = (args['ci-buy-only'] ?? 'false') === 'true';
   const maxConsecLossDays   = parseInt(args['max-consec-loss-days'] ?? String(cfg['MAX_CONSEC_LOSS_DAYS'] ?? 0), 10);
   const epD1Align           = (args['ep-d1-align'] ?? 'false') === 'true';
@@ -172,6 +185,18 @@ async function main(): Promise<void> {
   const epDiTf    = (epDiTfRaw === 'H4' || epDiTfRaw === 'D1') ? epDiTfRaw : undefined;
   const epDiMinGap          = parseFloat(args['ep-di-gap'] ?? '0');
   const spreadPoints        = parseFloat(args['spread'] ?? String(cfg['SPREAD_POINTS'] ?? 0.35));
+  const smaTrendPeriod      = parseInt(args['sma-trend'] ?? String(cfg['SMA_TREND_PERIOD'] ?? 0), 10);
+  const smaTrendTfRaw       = args['sma-trend-tf'] ?? String(cfg['SMA_TREND_TF'] ?? 'D1');
+  const smaTrendTf          = (smaTrendTfRaw === 'H4' || smaTrendTfRaw === 'H1') ? smaTrendTfRaw : 'D1' as const;
+  const enableSMAX          = (args['smax'] ?? String(cfg['ENABLE_SMAX'] ?? 'false')) === 'true';
+  const smaxFastPeriod      = parseInt(args['smax-fast'] ?? String(cfg['SMAX_FAST_PERIOD'] ?? 20), 10);
+  const smaxSlowPeriod      = parseInt(args['smax-slow'] ?? String(cfg['SMAX_SLOW_PERIOD'] ?? 50), 10);
+  const smaxTfRaw           = args['smax-tf'] ?? String(cfg['SMAX_TF'] ?? 'H1');
+  const smaxTf              = smaxTfRaw === 'H4' ? 'H4' as const : 'H1' as const;
+  const smaxLookback        = parseInt(args['smax-lookback'] ?? String(cfg['SMAX_LOOKBACK'] ?? 5), 10);
+  const enableSMAB          = (args['smab'] ?? String(cfg['ENABLE_SMAB'] ?? 'false')) === 'true';
+  const smabTfRaw           = args['smab-tf'] ?? String(cfg['SMAB_TF'] ?? 'H1');
+  const smabTf              = smabTfRaw === 'H4' ? 'H4' as const : 'H1' as const;
   if (!from || !to) {
     console.error('\nUso: npm run backtest -- --start YYYY-MM-DD --end YYYY-MM-DD [--symbol SPX500] [--balance 10000] [--risk 1] [--cooldown 30] [--proximity 20]\n');
     process.exit(1);
@@ -204,6 +229,7 @@ async function main(): Promise<void> {
     epMaxHour,
     epAdxPeriod,
     epAdxMin,
+    epAdxMax,
     epH1AdxMin,
     epH4Align,
     ciPeriod,
@@ -214,6 +240,15 @@ async function main(): Promise<void> {
     epDiTf,
     epDiMinGap,
     spreadPoints,
+    smaTrendPeriod,
+    smaTrendTf,
+    enableSMAX,
+    smaxFastPeriod,
+    smaxSlowPeriod,
+    smaxTf,
+    smaxLookback,
+    enableSMAB,
+    smabTf,
   });
 
   printReport(report);

@@ -31,20 +31,29 @@
       "label": "Out of market"
     }
   ],
+  "SPREAD_POINTS": 0.35,
   "MIN_SL_POINTS": 8.0,
   "MIN_FVG_POINTS": 3.0,
   "ZONE_PROXIMITY_POINTS": 20.0,
   "ZONE_SL_BUFFER_POINTS": 8.0,
-  "EMA_SPREAD_MIN": 12.0,
+  "EMA_SPREAD_MIN": 8.0,
   "EP_M15_ALIGN": true,
   "EP_SKIP_MONDAY": true,
   "EP_MIN_HOUR": 10,
   "EP_MAX_HOUR": 13,
   "EP_H4_ALIGN": false,
   "EP_ADX_PERIOD": 14,
-  "EP_ADX_MIN": 0.0,
+  "EP_ADX_MIN": 25.0,
   "BE_AT_POINTS": 0.0,
   "BE_BUFFER_POINTS": 0.25,
   "PARTIAL_TP_ENABLED": false,
-  "SEMI_AUTO_MODE": false
+  "SEMI_AUTO_MODE": false,
+  "SMA_TREND_PERIOD": 200,
+  "SMA_TREND_TF": "D1",
+  "ZB_ENABLED": true,
+  "ENABLE_SMAX": true,
+  "SMAX_FAST_PERIOD": 20,
+  "SMAX_SLOW_PERIOD": 50,
+  "SMAX_TF": "H1",
+  "SMAX_LOOKBACK": 5
 }
