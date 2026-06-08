@@ -141,7 +141,7 @@ El bridge incluye un dashboard en `http://localhost:8000` con las siguientes sec
 - **Estado del bridge** — conexión MT5 (verde / rojo)
 - **Estado del bot** — semáforo en tiempo real con razón de bloqueo
 - **Licencia** — visualizar y validar la clave de licencia
-- **Configuración** — editar símbolo, riesgo, modo live, cooldown; límite de pérdida diaria (con barra de progreso); máximo de trades diarios; filtros de entrada (SL mínimo, FVG mínimo, spread EMA mínimo, confirmación M15 para señal EP, circuit breaker de pérdidas consecutivas); gestión de posiciones (trigger break-even, buffer BE, toggle TP parcial); modo semi-automático. Hot-reload sin reiniciar el bot.
+- **Configuración** — editar solo parámetros operativos: riesgo por operación, modo live, ruta del terminal MT5. La estrategia validada en backtests (motores ZB/EP/SMAX, filtro de tendencia SMA200, SL/FVG, EP, ADX, cooldown, horarios, guards, gestión de posiciones) no es editable desde el panel — se ajusta en `config.json`. Hot-reload sin reiniciar el bot.
 - **Telegram** — configurar token y chat ID, toggle de notificaciones, botón de prueba
 - **Journal** — estadísticas (win rate, profit factor, avg R:R, P&L, rachas de pérdidas) + tabla de las últimas 20 operaciones con resultado y R:R real
 
