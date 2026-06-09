@@ -389,8 +389,8 @@ Desglose por señal (2025):
 | PUT | `/api/telegram` | Actualizar credenciales Telegram |
 | POST | `/api/telegram/test` | Enviar mensaje de prueba |
 | GET | `/api/trading/history/{ticket}` | Historial de cierre de una posición |
-| GET | `/api/journal/trades` | Últimas N operaciones del journal |
-| GET | `/api/journal/stats` | Estadísticas: win rate, profit factor, avg R:R, P&L, rachas de pérdidas |
+| GET | `/api/journal/trades` | Últimas N operaciones del journal (filtradas por símbolo del bot) |
+| GET | `/api/journal/stats` | Estadísticas: win rate, profit factor, avg R:R, P&L, rachas de pérdidas (filtradas por símbolo del bot) |
 
 ## Notificaciones Telegram
 
