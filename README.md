@@ -221,9 +221,11 @@ npm install
 
 # Entorno virtual Python
 python -m venv apps/mt5-bridge/.venv
-apps\mt5-bridge\.venv\Scripts\activate
+apps\mt5-bridge\.venv\Scripts\Activate.ps1
 pip install -r apps/mt5-bridge/requirements.txt
 ```
+
+> Si moviste o renombraste la carpeta del proyecto, el venv queda roto (las rutas dentro de `.venv` son absolutas). Corre `apps\mt5-bridge\setup.bat` para recrearlo desde cero en la ubicación actual.
 
 ## Configuración
 
@@ -253,11 +255,12 @@ DATABASE_URL=postgresql://...
 **1. Abrir MetaTrader 5** con la cuenta activa y `SPX500` visible en el Market Watch.
 
 **2. Arrancar el bridge** (terminal 1):
-```bash
+```powershell
 cd apps\mt5-bridge
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload
 ```
+> Alternativa rápida: `apps\mt5-bridge\start.bat` hace los tres pasos en uno.
 
 **3. Arrancar el bot** (terminal 2):
 ```bash
