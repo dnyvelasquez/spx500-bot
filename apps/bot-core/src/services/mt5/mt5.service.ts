@@ -10,6 +10,7 @@ import {
   ModifyPositionResponse,
   PositionHistoryResponse,
   PartialCloseResponse,
+  SymbolInfoResponse,
 } from "./mt5.types";
 
 export class MT5Service {
@@ -91,6 +92,13 @@ export class MT5Service {
     const response = await axios.post<PartialCloseResponse>(
       `${this.baseUrl}/positions/${ticket}/close`,
       { symbol },
+    );
+    return response.data;
+  }
+
+  async getSymbolInfo(symbol: string): Promise<SymbolInfoResponse> {
+    const response = await axios.get<SymbolInfoResponse>(
+      `${this.baseUrl}/symbol-info/${symbol}`
     );
     return response.data;
   }

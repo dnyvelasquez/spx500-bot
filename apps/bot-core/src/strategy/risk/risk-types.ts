@@ -8,6 +8,8 @@ export interface RiskParameters {
   stopLoss: number;
 
   target: number;
+
+  tradeContractSize: number;
 }
 
 export interface PositionSizingResult {

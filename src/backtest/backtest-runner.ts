@@ -816,6 +816,7 @@ export async function runBacktest(params: BacktestParams): Promise<BacktestRepor
       entryPrice: signalEntry,
       stopLoss,
       target: takeProfit,
+      tradeContractSize: 1,
     });
     if (sizing.riskRewardRatio < 2) continue;
     // Actual fill price: BUY pays ask (close + spread), SELL receives bid (close − spread)

@@ -41,6 +41,18 @@ class MT5Client:
         mt5.shutdown()
 
     @staticmethod
+    def get_symbol_info(symbol: str):
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return None
+        return {
+            "point": float(info.point),
+            "tradeTickSize": float(info.trade_tick_size),
+            "tradeTickValue": float(info.trade_tick_value),
+            "tradeContractSize": float(info.trade_contract_size),
+        }
+
+    @staticmethod
     def get_symbol_tick(symbol: str):
 
         tick = mt5.symbol_info_tick(symbol)

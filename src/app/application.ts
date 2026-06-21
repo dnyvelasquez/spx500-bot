@@ -82,6 +82,7 @@ export class Application {
   private openPositionTickets = new Set<number>();
   private mt5Login = 0;
   private lastKnownBalance = 0;
+  private symbolContractSize = 10;
   private bridgeDown = false;
   private marketOpen = false;
   private approvalPending = false;
@@ -100,6 +101,8 @@ export class Application {
     logger.info('Application starting...');
 
     await this.validateLicense();
+
+    await this.loadSymbolInfo();
 
     await this.journal.initialize();
 
@@ -157,6 +160,21 @@ export class Application {
       const reason = err instanceof Error ? err.message : String(err);
       logger.error({ reason }, 'License validation failed — bot will not start');
       throw err;
+    }
+  }
+
+  private async loadSymbolInfo(): Promise<void> {
+    const symbol = configService.symbol;
+    try {
+      const res = await this.mt5.getSymbolInfo(symbol);
+      if (res.success && res.data) {
+        this.symbolContractSize = res.data.tradeContractSize;
+        logger.info({ symbol, contractSize: this.symbolContractSize }, 'Symbol info loaded');
+      } else {
+        logger.warn({ symbol }, 'Could not load symbol info — using fallback contract size');
+      }
+    } catch {
+      logger.warn({ symbol }, 'Could not load symbol info — using fallback contract size');
     }
   }
 
@@ -760,6 +778,7 @@ export class Application {
       entryPrice,
       stopLoss,
       target: takeProfit,
+      tradeContractSize: this.symbolContractSize,
     });
 
     if (sizing.riskRewardRatio < 2) {
