@@ -26,6 +26,7 @@ interface BotConfig {
   MAX_DAILY_TRADES?: number;
   MIN_FVG_POINTS?: number;
   MIN_SL_POINTS?: number;
+  EP_MAX_SL_POINTS?: number;
   PARTIAL_TP_ENABLED?: boolean;
   SEMI_AUTO_MODE?: boolean;
   ZONE_PROXIMITY_POINTS?: number;
@@ -72,6 +73,7 @@ class ConfigService {
   get maxDailyTrades(): number { return this.config.MAX_DAILY_TRADES ?? 0; }
   get minFvgPoints(): number { return this.config.MIN_FVG_POINTS ?? 0; }
   get minSlPoints(): number { return this.config.MIN_SL_POINTS ?? 0; }
+  get epMaxSlPoints(): number { return this.config.EP_MAX_SL_POINTS ?? 0; }
   get partialTpEnabled(): boolean { return this.config.PARTIAL_TP_ENABLED ?? false; }
   get semiAutoMode(): boolean { return this.config.SEMI_AUTO_MODE ?? false; }
   get zoneProximityPoints(): number { return this.config.ZONE_PROXIMITY_POINTS ?? 20; }

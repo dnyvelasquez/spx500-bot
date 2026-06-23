@@ -168,6 +168,7 @@ async function main(): Promise<void> {
   const enableZB         = (args['zb'] ?? String(cfg['ZB_ENABLED'] ?? 'true')) !== 'false';
   const enableEP         = (args['ep'] ?? 'true') !== 'false';
   const epMinSlPoints    = parseFloat(args['ep-min-sl'] ?? String(cfg['EP_MIN_SL_POINTS'] ?? 0));
+  const epMaxSlPoints    = parseFloat(args['ep-max-sl'] ?? String(cfg['EP_MAX_SL_POINTS'] ?? 0));
   const epSkipMonday     = (args['ep-skip-monday'] ?? String(cfg['EP_SKIP_MONDAY'] ?? 'false')) === 'true';
   const epMinHour        = parseInt(args['ep-min-hour'] ?? String(cfg['EP_MIN_HOUR'] ?? 0), 10);
   const epMaxHour        = parseInt(args['ep-max-hour']   ?? String(cfg['EP_MAX_HOUR']   ?? 0),  10);
@@ -224,6 +225,7 @@ async function main(): Promise<void> {
     enableZB,
     enableEP,
     epMinSlPoints,
+    epMaxSlPoints,
     epSkipMonday,
     epMinHour,
     epMaxHour,

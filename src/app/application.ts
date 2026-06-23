@@ -664,6 +664,7 @@ export class Application {
 
     const slDist = Math.abs(entryPrice - stopLoss);
     if (configService.minSlPoints > 0 && slDist < configService.minSlPoints) return null;
+    if (configService.epMaxSlPoints > 0 && slDist > configService.epMaxSlPoints) return null;
 
     const takeProfit = direction === 'BULLISH'
       ? entryPrice + slDist * 2
